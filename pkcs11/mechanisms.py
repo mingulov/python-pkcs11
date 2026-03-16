@@ -731,8 +731,9 @@ class Mechanism(IntEnum):
     """
 
     # from version 3.0
-    EDDSA = 0x00001057
+    EC_MONTGOMERY_KEY_PAIR_GEN = 0x00001054
     EC_EDWARDS_KEY_PAIR_GEN = 0x00001055
+    EDDSA = 0x00001057
 
     SHA3_256 = 0x000002B0
     SHA3_256_HMAC = 0x000002B1
