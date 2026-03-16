@@ -808,8 +808,11 @@ class GCMParams:
     tag_bits: int
 
     def __init__(self, nonce: bytes, aad: bytes | None = None, tag_bits: int = 128) -> None:
-        if len(nonce) > 12:
-            raise ArgumentsBad("IV must be less than 12 bytes")
+        # NIST SP 800-38D recommends 96-bit (12-byte) IVs but allows any length.
+        # PKCS#11 CK_GCM_PARAMS has no IV length restriction.
+        # We do not enforce a maximum here — the module will reject if unsupported.
+        if len(nonce) == 0:
+            raise ArgumentsBad("GCM nonce must not be empty")
         self.nonce = nonce
         self.aad = aad
         self.tag_bits = tag_bits
