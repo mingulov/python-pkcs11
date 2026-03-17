@@ -1468,11 +1468,15 @@ cdef object make_object(Session session, CK_OBJECT_HANDLE handle) with gil:
                 except (AttributeTypeInvalid, AttributeSensitive, FunctionFailed):
                     continue
 
-        # Fetch v3.2 KEM attributes separately so they don't break v2.40 batch fetches
+        # Fetch v3.2 KEM attributes separately into a plain dict so that we
+        # don't mutate the AttributeList returned by get_attribute_list (which
+        # doesn't support __setitem__) and so that missing attributes on older
+        # tokens silently produce a falsy value rather than a KeyError.
+        kem_attrs: dict = {}
         if session.funclist32 != NULL:
             for key in (Attribute.ENCAPSULATE, Attribute.DECAPSULATE):
                 try:
-                    attributes[key] = wrapper[key]
+                    kem_attrs[key] = wrapper[key]
                 except (AttributeTypeInvalid, AttributeSensitive, FunctionFailed, PKCS11Error):
                     pass
 
@@ -1501,11 +1505,8 @@ cdef object make_object(Session session, CK_OBJECT_HANDLE handle) with gil:
                     (Attribute.ENCAPSULATE, EncapsulateMixin),
                     (Attribute.DECAPSULATE, DecapsulateMixin),
             ):
-                try:
-                    if attributes.get(attribute):
-                        bases += (mixin,)
-                except KeyError:
-                    pass
+                if kem_attrs.get(attribute):
+                    bases += (mixin,)
 
         bases += (Object,)
 

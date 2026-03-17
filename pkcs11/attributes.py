@@ -49,10 +49,12 @@ ATTRIBUTE_TYPES: dict[Attribute, Handler] = {
     Attribute.CHECK_VALUE: handle_bytes,
     Attribute.CLASS: _enum(ObjectClass),
     Attribute.COEFFICIENT: handle_biginteger,
+    Attribute.DECAPSULATE: handle_bool,
     Attribute.DECRYPT: handle_bool,
     Attribute.DERIVE: handle_bool,
     Attribute.EC_PARAMS: handle_bytes,
     Attribute.EC_POINT: handle_bytes,
+    Attribute.ENCAPSULATE: handle_bool,
     Attribute.ENCRYPT: handle_bool,
     Attribute.END_DATE: handle_date,
     Attribute.EXPONENT_1: handle_biginteger,
@@ -72,6 +74,8 @@ ATTRIBUTE_TYPES: dict[Attribute, Handler] = {
     Attribute.MODULUS_BITS: handle_ulong,
     Attribute.NEVER_EXTRACTABLE: handle_bool,
     Attribute.OBJECT_ID: handle_bytes,
+    Attribute.PARAMETER_SET: handle_ulong,
+    Attribute.PROFILE_ID: handle_ulong,
     Attribute.PRIME: handle_biginteger,
     Attribute.PRIME_BITS: handle_ulong,
     Attribute.PRIME_1: handle_biginteger,
@@ -114,6 +118,11 @@ ALL_CAPABILITIES: Final[tuple[Attribute, ...]] = (
     Attribute.SIGN,
     Attribute.VERIFY,
     Attribute.DERIVE,
+    # NOTE: ENCAPSULATE and DECAPSULATE are intentionally excluded here.
+    # They are only valid on asymmetric key objects (ML-KEM), not on secret
+    # keys.  Passing CKA_ENCAPSULATE=False to C_GenerateKey causes
+    # CKR_ATTRIBUTE_VALUE_INVALID on tokens that enforce the restriction.
+    # Keypair templates handle them via public_key_template/private_key_template.
 )
 
 
@@ -147,6 +156,8 @@ _capa_attr_to_mechanism_flag: Final[dict[Attribute, MechanismFlag]] = {
     Attribute.SIGN: MechanismFlag.SIGN,
     Attribute.VERIFY: MechanismFlag.VERIFY,
     Attribute.DERIVE: MechanismFlag.DERIVE,
+    Attribute.ENCAPSULATE: MechanismFlag.ENCAPSULATE,
+    Attribute.DECAPSULATE: MechanismFlag.DECAPSULATE,
 }
 
 
@@ -211,7 +222,9 @@ class AttributeMapper:
     ) -> dict[Attribute, Any]:
         template = self.default_public_key_template
         _apply_capabilities(
-            template, (Attribute.ENCRYPT, Attribute.WRAP, Attribute.VERIFY), capabilities
+            template,
+            (Attribute.ENCRYPT, Attribute.WRAP, Attribute.VERIFY, Attribute.ENCAPSULATE),
+            capabilities,
         )
         _apply_common(template, id_, label, store)
         return template
@@ -227,7 +240,7 @@ class AttributeMapper:
         template = self.default_private_key_template
         _apply_capabilities(
             template,
-            (Attribute.DECRYPT, Attribute.UNWRAP, Attribute.SIGN, Attribute.DERIVE),
+            (Attribute.DECRYPT, Attribute.UNWRAP, Attribute.SIGN, Attribute.DERIVE, Attribute.DECAPSULATE),
             capabilities,
         )
         _apply_common(template, id_, label, store)
