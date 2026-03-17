@@ -117,9 +117,13 @@ class KeyType(IntEnum):
     CHACHA20 = 0x00000033
     POLY1305 = 0x00000035
 
-    # PKCS#11 v3.2 — PQC / KEM key types
+    # PKCS#11 v3.2 — PQC key types
     ML_KEM = 0x00000049
     """ML-KEM (CRYSTALS-Kyber) post-quantum KEM key (FIPS 203)."""
+    ML_DSA = 0x0000004A
+    """ML-DSA (CRYSTALS-Dilithium) post-quantum signature key (FIPS 204)."""
+    SLH_DSA = 0x0000004B
+    """SLH-DSA (SPHINCS+) post-quantum hash-based signature key (FIPS 205)."""
 
     _VENDOR_DEFINED = 0x80000000
 
@@ -824,6 +828,42 @@ class Mechanism(IntEnum):
     """Generate an ML-KEM key pair."""
     ML_KEM = 0x00000017
     """ML-KEM encapsulate/decapsulate (C_EncapsulateKey / C_DecapsulateKey)."""
+
+    # PKCS#11 v3.2 — ML-DSA (CRYSTALS-Dilithium, FIPS 204) post-quantum signatures
+    ML_DSA_KEY_PAIR_GEN = 0x0000001C
+    """Generate an ML-DSA key pair."""
+    ML_DSA = 0x0000001D
+    """ML-DSA sign/verify (pure, without pre-hashing)."""
+    HASH_ML_DSA = 0x0000001F
+    """ML-DSA hash-and-sign (module default hash)."""
+    HASH_ML_DSA_SHA224 = 0x00000023
+    HASH_ML_DSA_SHA256 = 0x00000024
+    HASH_ML_DSA_SHA384 = 0x00000025
+    HASH_ML_DSA_SHA512 = 0x00000026
+    HASH_ML_DSA_SHA3_224 = 0x00000027
+    HASH_ML_DSA_SHA3_256 = 0x00000028
+    HASH_ML_DSA_SHA3_384 = 0x00000029
+    HASH_ML_DSA_SHA3_512 = 0x0000002A
+    HASH_ML_DSA_SHAKE128 = 0x0000002B
+    HASH_ML_DSA_SHAKE256 = 0x0000002C
+
+    # PKCS#11 v3.2 — SLH-DSA (SPHINCS+, FIPS 205) post-quantum hash-based signatures
+    SLH_DSA_KEY_PAIR_GEN = 0x0000002D
+    """Generate an SLH-DSA key pair."""
+    SLH_DSA = 0x0000002E
+    """SLH-DSA sign/verify (pure)."""
+    HASH_SLH_DSA = 0x00000034
+    """SLH-DSA hash-and-sign (module default hash)."""
+    HASH_SLH_DSA_SHA224 = 0x00000036
+    HASH_SLH_DSA_SHA256 = 0x00000037
+    HASH_SLH_DSA_SHA384 = 0x00000038
+    HASH_SLH_DSA_SHA512 = 0x00000039
+    HASH_SLH_DSA_SHA3_224 = 0x0000003A
+    HASH_SLH_DSA_SHA3_256 = 0x0000003B
+    HASH_SLH_DSA_SHA3_384 = 0x0000003C
+    HASH_SLH_DSA_SHA3_512 = 0x0000003D
+    HASH_SLH_DSA_SHAKE128 = 0x0000003E
+    HASH_SLH_DSA_SHAKE256 = 0x0000003F
 
     _VENDOR_DEFINED = 0x80000000
 

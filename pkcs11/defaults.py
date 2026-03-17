@@ -24,6 +24,8 @@ DEFAULT_GENERATE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.EC_EDWARDS: Mechanism.EC_EDWARDS_KEY_PAIR_GEN,
     KeyType.GENERIC_SECRET: Mechanism.GENERIC_SECRET_KEY_GEN,
     KeyType.ML_KEM: Mechanism.ML_KEM_KEY_PAIR_GEN,
+    KeyType.ML_DSA: Mechanism.ML_DSA_KEY_PAIR_GEN,
+    KeyType.SLH_DSA: Mechanism.SLH_DSA_KEY_PAIR_GEN,
 }
 """
 Default mechanisms for generating keys.
@@ -44,6 +46,8 @@ DEFAULT_KEY_CAPABILITIES: Final[dict[KeyType, MechanismFlag | int]] = {
     KeyType.GENERIC_SECRET: 0,
     KeyType.EC_EDWARDS: _SIGNING,
     KeyType.ML_KEM: MechanismFlag.ENCAPSULATE | MechanismFlag.DECAPSULATE,
+    KeyType.ML_DSA: _SIGNING,
+    KeyType.SLH_DSA: _SIGNING,
 }
 """
 Default capabilities for generating keys.
@@ -67,6 +71,8 @@ DEFAULT_SIGN_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.EC: Mechanism.ECDSA_SHA512,
     KeyType.RSA: Mechanism.SHA512_RSA_PKCS,
     KeyType.EC_EDWARDS: Mechanism.EDDSA,
+    KeyType.ML_DSA: Mechanism.ML_DSA,
+    KeyType.SLH_DSA: Mechanism.SLH_DSA,
 }
 """
 Default mechanisms for sign/verify.

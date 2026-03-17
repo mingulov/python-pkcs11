@@ -569,3 +569,49 @@ class MLKemParameterSet(IntEnum):
     """ML-KEM-768 — NIST security category 3 (192-bit classical, default)."""
     ML_KEM_1024 = 0x00000003
     """ML-KEM-1024 — NIST security category 5 (256-bit classical)."""
+
+
+@unique
+class MLDsaParameterSet(IntEnum):
+    """
+    ML-DSA (CRYSTALS-Dilithium / FIPS 204) parameter sets (PKCS#11 v3.2).
+
+    Specify via ``Attribute.PARAMETER_SET`` in the key generation template.
+    """
+
+    ML_DSA_44 = 0x00000001
+    """ML-DSA-44 — NIST security category 2."""
+    ML_DSA_65 = 0x00000002
+    """ML-DSA-65 — NIST security category 3 (recommended default)."""
+    ML_DSA_87 = 0x00000003
+    """ML-DSA-87 — NIST security category 5."""
+
+
+@unique
+class SlhDsaParameterSet(IntEnum):
+    """
+    SLH-DSA (SPHINCS+ / FIPS 205) parameter sets (PKCS#11 v3.2).
+
+    Specify via ``Attribute.PARAMETER_SET`` in the key generation template.
+    Parameter names follow the FIPS 205 naming convention (hash-security-type).
+    """
+
+    SHA2_128S = 0x00000001
+    """SLH-DSA-SHA2-128s — small/slow, security category 1."""
+    SHAKE_128S = 0x00000002
+    """SLH-DSA-SHAKE-128s — security category 1."""
+    SHA2_128F = 0x00000003
+    """SLH-DSA-SHA2-128f — fast, security category 1."""
+    SHAKE_128F = 0x00000004
+    """SLH-DSA-SHAKE-128f — security category 1."""
+    SHA2_192S = 0x00000005
+    """SLH-DSA-SHA2-192s — security category 3."""
+    SHAKE_192S = 0x00000006
+    SHA2_192F = 0x00000007
+    SHAKE_192F = 0x00000008
+    SHA2_256S = 0x00000009
+    """SLH-DSA-SHA2-256s — security category 5."""
+    SHAKE_256S = 0x0000000A
+    SHA2_256F = 0x0000000B
+    SHAKE_256F = 0x0000000C
+    """SLH-DSA-SHAKE-256f — fast, security category 5."""
