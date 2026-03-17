@@ -145,8 +145,25 @@ def _apply_capabilities(
     capabilities: MechanismFlag | int,
 ) -> None:
     for attr in possible_capas:
-        template[attr] = _capa_attr_to_mechanism_flag[attr] & capabilities
+        flag = _capa_attr_to_mechanism_flag[attr]
+        if attr in _OPT_IN_CAPABILITIES:
+            # Opt-in attributes (e.g. ENCAPSULATE/DECAPSULATE) are only
+            # added when the caller explicitly requests them.  Setting
+            # them to False on modules that don't recognize the attribute
+            # causes CKR_ATTRIBUTE_TYPE_INVALID.
+            if flag & capabilities:
+                template[attr] = True
+        else:
+            template[attr] = bool(flag & capabilities)
 
+
+# Capability attributes that are only added to templates when the caller
+# explicitly sets the corresponding flag.  Never set to False, preventing
+# CKR_ATTRIBUTE_TYPE_INVALID on modules that don't recognize them.
+_OPT_IN_CAPABILITIES: Final[frozenset[Attribute]] = frozenset({
+    Attribute.ENCAPSULATE,
+    Attribute.DECAPSULATE,
+})
 
 _capa_attr_to_mechanism_flag: Final[dict[Attribute, MechanismFlag]] = {
     Attribute.ENCRYPT: MechanismFlag.ENCRYPT,
