@@ -367,11 +367,11 @@ cdef class MechanismWithParam:
                 hkdf_params.prfHashMechanism = <CK_MECHANISM_TYPE> prf_hash
 
             if salt is not None and len(salt) > 0:
-                hkdf_params.ulSaltType = 0x00000002  # CKF_HKDF_SALT_DATA
+                hkdf_params.ulSaltType = CKF_HKDF_SALT_DATA
                 hkdf_params.pSalt = <CK_BYTE *> salt
                 hkdf_params.ulSaltLen = <CK_ULONG> len(salt)
             else:
-                hkdf_params.ulSaltType = 0x00000001  # CKF_HKDF_SALT_NULL
+                hkdf_params.ulSaltType = CKF_HKDF_SALT_NULL
                 hkdf_params.pSalt = NULL
                 hkdf_params.ulSaltLen = 0
             hkdf_params.hSaltKey = 0  # Not using key-based salt

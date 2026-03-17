@@ -294,6 +294,12 @@ cdef extern from '../extern/cryptoki.h':
         CK_BYTE *pAAD
         CK_ULONG ulAADLen
 
+    # CK_HKDF salt type constants (PKCS#11 v3.0, pkcs11t.h)
+    cdef enum:
+        CKF_HKDF_SALT_NULL = 0x00000001
+        CKF_HKDF_SALT_DATA = 0x00000002
+        CKF_HKDF_SALT_KEY  = 0x00000004
+
     ctypedef struct CK_HKDF_PARAMS:
         CK_BBOOL bExtract
         CK_BBOOL bExpand
@@ -912,6 +918,8 @@ cdef extern from '../extern/cryptoki.h':
 
     # PKCS#11 v3.2 extended function list — superset of CK_FUNCTION_LIST_3_0.
     # Adds encapsulate/decapsulate (KEM) and other v3.2 functions.
+    # Cython cannot inherit C structs, so v2.40+v3.0 fields are repeated
+    # to get correct offsets for the v3.2 additions at the end.
     cdef struct CK_FUNCTION_LIST_3_2:
         CK_VERSION version
         ## v2.40 base (same layout as CK_FUNCTION_LIST)
