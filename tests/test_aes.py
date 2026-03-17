@@ -478,11 +478,11 @@ class AESTests(TestCase):
         )
         self.assertEqual(data, text)
 
-    def test_gcm_nonce_size_limit(self):
-        def _inst():
-            return GCMParams(nonce=b"0" * 13)
-
-        self.assertRaises(ArgumentsBad, _inst)
+    def test_gcm_nonce_size_non_standard(self):
+        # NIST SP 800-38D recommends 96-bit (12-byte) IVs but does not mandate it.
+        # Non-12-byte IVs are valid per spec; the module decides acceptance.
+        params = GCMParams(nonce=b"0" * 13)
+        self.assertEqual(len(params.nonce), 13)
 
     @requires(Mechanism.AES_GCM)
     def test_encrypt_gcm_with_aad(self):
