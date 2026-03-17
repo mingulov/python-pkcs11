@@ -185,6 +185,8 @@ class Attribute(IntEnum):
     """Key supports KEM encapsulation (PKCS#11 v3.2, :class:`bool`)."""
     DECAPSULATE = 0x00000634
     """Key supports KEM decapsulation (PKCS#11 v3.2, :class:`bool`)."""
+    PARAMETER_SET = 0x0000061D
+    """PQC algorithm parameter set (e.g. ML-KEM-512/768/1024, PKCS#11 v3.2, :class:`int`)."""
     START_DATE = 0x00000110
     """Start date for the object's validity (:class:`datetime.date`)."""
     END_DATE = 0x00000111
@@ -550,3 +552,20 @@ class CancelStrategy(IntEnum):
     """
 
     # TODO support cancelling with C_SessionCancel on PKCS#11 3.0 and up
+
+
+@unique
+class MLKemParameterSet(IntEnum):
+    """
+    ML-KEM (CRYSTALS-Kyber / FIPS 203) parameter sets (PKCS#11 v3.2).
+
+    Specify via ``CKA_PARAMETER_SET`` (Attribute.PARAMETER_SET) in the key
+    generation template to select the desired security level.
+    """
+
+    ML_KEM_512 = 0x00000001
+    """ML-KEM-512 — NIST security category 1 (128-bit classical)."""
+    ML_KEM_768 = 0x00000002
+    """ML-KEM-768 — NIST security category 3 (192-bit classical, default)."""
+    ML_KEM_1024 = 0x00000003
+    """ML-KEM-1024 — NIST security category 5 (256-bit classical)."""

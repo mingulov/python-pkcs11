@@ -1518,15 +1518,125 @@ cdef object make_object(Session session, CK_OBJECT_HANDLE handle) with gil:
         return Object(wrapper)
 
 
+class EncapsulateMixin(types.EncapsulateMixin):
+    """Expand EncapsulateMixin with an implementation (PKCS#11 v3.2+)."""
+
+    def encapsulate_key(self, key_type,
+                        id=None, label=None,
+                        store=False, capabilities=None,
+                        mechanism=None, mechanism_param=None,
+                        template=None):
+
+        if not isinstance(key_type, KeyType):
+            raise ArgumentsBad("`key_type` must be KeyType.")
+
+        if capabilities is None:
+            try:
+                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
+            except KeyError:
+                raise ArgumentsBad("No default capabilities for this key "
+                                   "type. Please specify `capabilities`.")
+
+        mech = MechanismWithParam(self.key_type, DEFAULT_ENCAPSULATE_MECHANISMS, mechanism, mechanism_param)
+
+        cdef Session session = self.session
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("encapsulate_key requires PKCS#11 v3.2 interface")
+
+        template_ = session.attribute_mapper.secret_key_template(
+            capabilities=capabilities, id_=id, label=label, store=store,
+        )
+        template_[Attribute.KEY_TYPE] = key_type
+        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
+        cdef CK_MECHANISM *mech_data = mech.data
+        cdef CK_OBJECT_HANDLE pub_key = self.handle
+        cdef CK_ATTRIBUTE *attr_data = attrs.data
+        cdef CK_ULONG attr_count = attrs.count
+        cdef CK_ULONG ct_len
+        cdef CK_OBJECT_HANDLE key
+        cdef CK_RV retval
+
+        # First call: determine ciphertext length
+        with nogil:
+            retval = session.funclist32.C_EncapsulateKey(
+                session.handle, mech_data, pub_key,
+                attr_data, attr_count,
+                NULL, &ct_len, &key)
+        assertRV(retval)
+
+        cdef CK_BYTE [:] ct_buf = CK_BYTE_buffer(ct_len)
+
+        # Second call: retrieve ciphertext and key handle
+        with nogil:
+            retval = session.funclist32.C_EncapsulateKey(
+                session.handle, mech_data, pub_key,
+                attr_data, attr_count,
+                &ct_buf[0], &ct_len, &key)
+        assertRV(retval)
+
+        return bytes(ct_buf[:ct_len]), make_object(session, key)
+
+
+class DecapsulateMixin(types.DecapsulateMixin):
+    """Expand DecapsulateMixin with an implementation (PKCS#11 v3.2+)."""
+
+    def decapsulate_key(self, key_type, ciphertext,
+                        id=None, label=None,
+                        store=False, capabilities=None,
+                        mechanism=None, mechanism_param=None,
+                        template=None):
+
+        if not isinstance(key_type, KeyType):
+            raise ArgumentsBad("`key_type` must be KeyType.")
+
+        if capabilities is None:
+            try:
+                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
+            except KeyError:
+                raise ArgumentsBad("No default capabilities for this key "
+                                   "type. Please specify `capabilities`.")
+
+        mech = MechanismWithParam(self.key_type, DEFAULT_ENCAPSULATE_MECHANISMS, mechanism, mechanism_param)
+
+        cdef Session session = self.session
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("decapsulate_key requires PKCS#11 v3.2 interface")
+
+        template_ = session.attribute_mapper.secret_key_template(
+            capabilities=capabilities, id_=id, label=label, store=store,
+        )
+        template_[Attribute.KEY_TYPE] = key_type
+        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
+        cdef CK_MECHANISM *mech_data = mech.data
+        cdef CK_OBJECT_HANDLE priv_key = self.handle
+        cdef CK_BYTE *ct_ptr = ciphertext
+        cdef CK_ULONG ct_len = <CK_ULONG> len(ciphertext)
+        cdef CK_ATTRIBUTE *attr_data = attrs.data
+        cdef CK_ULONG attr_count = attrs.count
+        cdef CK_OBJECT_HANDLE key
+        cdef CK_RV retval
+
+        with nogil:
+            retval = session.funclist32.C_DecapsulateKey(
+                session.handle, mech_data, priv_key,
+                attr_data, attr_count,
+                ct_ptr, ct_len, &key)
+        assertRV(retval)
+
+        return make_object(session, key)
+
+
 class SecretKey(types.SecretKey):
     pass
 
 
-class PublicKey(types.PublicKey):
+class PublicKey(EncapsulateMixin, types.PublicKey):
     pass
 
 
-class PrivateKey(types.PrivateKey):
+class PrivateKey(DecapsulateMixin, types.PrivateKey):
     pass
 
 
@@ -2045,116 +2155,6 @@ class DeriveMixin(types.DeriveMixin):
 
         with nogil:
             retval = session.funclist.C_DeriveKey(session.handle, mech_data, src_key, attr_data, attr_count, &key)
-        assertRV(retval)
-
-        return make_object(session, key)
-
-
-class EncapsulateMixin(types.EncapsulateMixin):
-    """Expand EncapsulateMixin with an implementation (PKCS#11 v3.2+)."""
-
-    def encapsulate_key(self, key_type,
-                        id=None, label=None,
-                        store=False, capabilities=None,
-                        mechanism=None, mechanism_param=None,
-                        template=None):
-
-        if not isinstance(key_type, KeyType):
-            raise ArgumentsBad("`key_type` must be KeyType.")
-
-        if capabilities is None:
-            try:
-                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
-            except KeyError:
-                raise ArgumentsBad("No default capabilities for this key "
-                                   "type. Please specify `capabilities`.")
-
-        mech = MechanismWithParam(self.key_type, DEFAULT_ENCAPSULATE_MECHANISMS, mechanism, mechanism_param)
-
-        cdef Session session = self.session
-
-        if session.funclist32 == NULL:
-            raise NotImplementedError("encapsulate_key requires PKCS#11 v3.2 interface")
-
-        template_ = session.attribute_mapper.secret_key_template(
-            capabilities=capabilities, id_=id, label=label, store=store,
-        )
-        template_[Attribute.KEY_TYPE] = key_type
-        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
-        cdef CK_MECHANISM *mech_data = mech.data
-        cdef CK_OBJECT_HANDLE pub_key = self.handle
-        cdef CK_ATTRIBUTE *attr_data = attrs.data
-        cdef CK_ULONG attr_count = attrs.count
-        cdef CK_ULONG ct_len
-        cdef CK_OBJECT_HANDLE key
-        cdef CK_RV retval
-
-        # First call: determine ciphertext length
-        with nogil:
-            retval = session.funclist32.C_EncapsulateKey(
-                session.handle, mech_data, pub_key,
-                attr_data, attr_count,
-                NULL, &ct_len, &key)
-        assertRV(retval)
-
-        cdef CK_BYTE [:] ct_buf = CK_BYTE_buffer(ct_len)
-
-        # Second call: retrieve ciphertext and key handle
-        with nogil:
-            retval = session.funclist32.C_EncapsulateKey(
-                session.handle, mech_data, pub_key,
-                attr_data, attr_count,
-                &ct_buf[0], &ct_len, &key)
-        assertRV(retval)
-
-        return bytes(ct_buf[:ct_len]), make_object(session, key)
-
-
-class DecapsulateMixin(types.DecapsulateMixin):
-    """Expand DecapsulateMixin with an implementation (PKCS#11 v3.2+)."""
-
-    def decapsulate_key(self, key_type, ciphertext,
-                        id=None, label=None,
-                        store=False, capabilities=None,
-                        mechanism=None, mechanism_param=None,
-                        template=None):
-
-        if not isinstance(key_type, KeyType):
-            raise ArgumentsBad("`key_type` must be KeyType.")
-
-        if capabilities is None:
-            try:
-                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
-            except KeyError:
-                raise ArgumentsBad("No default capabilities for this key "
-                                   "type. Please specify `capabilities`.")
-
-        mech = MechanismWithParam(self.key_type, DEFAULT_ENCAPSULATE_MECHANISMS, mechanism, mechanism_param)
-
-        cdef Session session = self.session
-
-        if session.funclist32 == NULL:
-            raise NotImplementedError("decapsulate_key requires PKCS#11 v3.2 interface")
-
-        template_ = session.attribute_mapper.secret_key_template(
-            capabilities=capabilities, id_=id, label=label, store=store,
-        )
-        template_[Attribute.KEY_TYPE] = key_type
-        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
-        cdef CK_MECHANISM *mech_data = mech.data
-        cdef CK_OBJECT_HANDLE priv_key = self.handle
-        cdef CK_BYTE *ct_ptr = ciphertext
-        cdef CK_ULONG ct_len = <CK_ULONG> len(ciphertext)
-        cdef CK_ATTRIBUTE *attr_data = attrs.data
-        cdef CK_ULONG attr_count = attrs.count
-        cdef CK_OBJECT_HANDLE key
-        cdef CK_RV retval
-
-        with nogil:
-            retval = session.funclist32.C_DecapsulateKey(
-                session.handle, mech_data, priv_key,
-                attr_data, attr_count,
-                ct_ptr, ct_len, &key)
         assertRV(retval)
 
         return make_object(session, key)
