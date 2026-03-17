@@ -1376,3 +1376,79 @@ class DeriveMixin(HasKeyType):
         :rtype: SecretKey
         """
         raise NotImplementedError()
+
+
+class EncapsulateMixin(HasKeyType):
+    """
+    This :class:`Object` supports the encapsulate capability (KEM, PKCS#11 v3.2+).
+    """
+
+    def encapsulate_key(
+        self,
+        key_type: KeyType,
+        id: bytes | None = None,
+        label: str | None = None,
+        store: bool = False,
+        capabilities: MechanismFlag | None = None,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+        template: dict[Attribute, Any] | None = None,
+    ) -> "tuple[bytes, SecretKey]":
+        """
+        Encapsulate a shared secret using this public key (KEM).
+
+        Returns a ``(ciphertext, key)`` tuple. The ciphertext is sent to the
+        other party who calls :meth:`DecapsulateMixin.decapsulate_key` to
+        recover the same shared secret. Requires PKCS#11 v3.2 interface.
+
+        :param KeyType key_type: Key type for the generated shared secret.
+        :param bytes id: Key identifier.
+        :param str label: Key label.
+        :param store: Store key on token (requires R/W session).
+        :param MechanismFlag capabilities: Key capabilities (or default).
+        :param Mechanism mechanism: Encapsulation mechanism (or default).
+        :param bytes mechanism_param: Optional mechanism parameter.
+        :param dict(Attribute,*) template: Additional attributes.
+
+        :rtype: tuple[bytes, SecretKey]
+        """
+        raise NotImplementedError()
+
+
+class DecapsulateMixin(HasKeyType):
+    """
+    This :class:`Object` supports the decapsulate capability (KEM, PKCS#11 v3.2+).
+    """
+
+    def decapsulate_key(
+        self,
+        key_type: KeyType,
+        ciphertext: bytes,
+        id: bytes | None = None,
+        label: str | None = None,
+        store: bool = False,
+        capabilities: MechanismFlag | None = None,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+        template: dict[Attribute, Any] | None = None,
+    ) -> "SecretKey":
+        """
+        Decapsulate a shared secret from ciphertext using this private key (KEM).
+
+        Recovers the shared secret encapsulated by the other party using
+        :meth:`EncapsulateMixin.encapsulate_key`. Requires PKCS#11 v3.2
+        interface.
+
+        :param KeyType key_type: Key type for the recovered shared secret.
+        :param bytes ciphertext: Ciphertext returned by encapsulate_key().
+        :param bytes id: Key identifier.
+        :param str label: Key label.
+        :param store: Store key on token (requires R/W session).
+        :param MechanismFlag capabilities: Key capabilities (or default).
+        :param Mechanism mechanism: Decapsulation mechanism (or default).
+        :param bytes mechanism_param: Optional mechanism parameter.
+        :param dict(Attribute,*) template: Additional attributes.
+
+        :rtype: SecretKey
+        """
+        raise NotImplementedError()

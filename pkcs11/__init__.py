@@ -19,15 +19,23 @@ if TYPE_CHECKING:
 _loaded: dict[str, Any] = {}
 
 
-def lib(so: str) -> _lib_type:
+def lib(so: str, interface: str = "auto") -> _lib_type:
     """
     Wrap the main library call coming from Cython with a preemptive
     dynamic loading.
+
+    :param so: Path to the PKCS#11 shared library.
+    :param interface: Requested interface version: ``"auto"`` (default),
+        ``"2.40"``, ``"3.0"``, ``"3.1"``, or ``"3.2"``.
     """
     global _loaded
 
+    # Cache key includes the requested interface so different interface
+    # versions of the same library are loaded as separate instances.
+    cache_key = f"{so}:{interface}"
+
     try:
-        _lib = _loaded[so]
+        _lib = _loaded[cache_key]
         if not _lib.initialized:
             _lib.initialize()
         return _lib
@@ -36,8 +44,8 @@ def lib(so: str) -> _lib_type:
 
     from . import _pkcs11
 
-    _lib = _pkcs11.lib(so)
-    _loaded[so] = _lib
+    _lib = _pkcs11.lib(so, interface=interface)
+    _loaded[cache_key] = _lib
 
     return _lib
 

@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Iterator
 
-from pkcs11.types import Slot, Token
+from pkcs11.types import (
+    EncapsulateMixin,
+    DecapsulateMixin,
+    HasKeyType,
+    Slot,
+    Token,
+)
+
+__all__ = ["lib", "EncapsulateMixin", "DecapsulateMixin"]
 
 class lib:
     """Main entry point for PKCS#11 library."""
@@ -14,11 +22,13 @@ class lib:
     library_description: str
     initialized: bool
 
-    def __init__(self, so: str) -> None: ...
+    def __init__(self, so: str, interface: str = "auto") -> None: ...
     @property
     def library_version(self) -> tuple[int, int]: ...
     @property
     def cryptoki_version(self) -> tuple[int, int]: ...
+    @property
+    def interface_version(self) -> str: ...
     def initialize(self) -> None: ...
     def finalize(self) -> None: ...
     def reinitialize(self) -> None: ...

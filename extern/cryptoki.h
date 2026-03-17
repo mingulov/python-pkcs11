@@ -33,29 +33,16 @@ extern "C" {
 #pragma warning "Cygwin 64 bits build will only work with Cygwin64-compiled PKCS#11 modules"
 #endif
 
-#define CK_PTR            *
-#define CK_DEFINE_FUNCTION(returnType, name) returnType name
-#define CK_DECLARE_FUNCTION(returnType, name) returnType name
-#define CK_DECLARE_FUNCTION_POINTER(returnType, name) returnType (* name)
-#define CK_CALLBACK_FUNCTION(returnType, name) returnType (* name)
+/* Use the public domain PKCS#11 v3.2 header from the Kryoptic project.
+ * The original OASIS multi-file headers (pkcs11.h / pkcs11t.h / pkcs11f.h)
+ * are retained for reference only; this wrapper now includes pkcs11_v32.h
+ * which is fully self-contained and placed in the Public Domain. */
+#include "pkcs11_v32.h"
 
-#ifndef NULL_PTR
-#define NULL_PTR          0
-#endif
-
-#if defined(_MSC_VER) && defined(_WIN32) /* we are compiling using Visual C */
-#pragma pack(push, cryptoki, 1)
-#elif defined(__CYGWIN__)
-#pragma pack(push, 1)
-#endif
-
-#include "pkcs11.h"
-
-#if defined(_MSC_VER) && defined(_WIN32) /* we are compiling using Visual C */
-#pragma pack(pop, cryptoki)
-#elif defined(__CYGWIN__)
-#pragma pack(pop)
-#endif
+/* python-pkcs11 extension: sentinel value for non-logged-in sessions.
+ * Not part of the PKCS#11 spec — used internally to distinguish
+ * "no login" from CKU_SO / CKU_USER / CKU_CONTEXT_SPECIFIC. */
+#define CKU_USER_NOBODY         999UL
 
 #ifdef __cplusplus
 }

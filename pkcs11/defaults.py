@@ -23,6 +23,7 @@ DEFAULT_GENERATE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.X9_42_DH: Mechanism.X9_42_DH_KEY_PAIR_GEN,
     KeyType.EC_EDWARDS: Mechanism.EC_EDWARDS_KEY_PAIR_GEN,
     KeyType.GENERIC_SECRET: Mechanism.GENERIC_SECRET_KEY_GEN,
+    KeyType.ML_KEM: Mechanism.ML_KEM_KEY_PAIR_GEN,
 }
 """
 Default mechanisms for generating keys.
@@ -42,6 +43,7 @@ DEFAULT_KEY_CAPABILITIES: Final[dict[KeyType, MechanismFlag | int]] = {
     KeyType.RSA: _ENCRYPTION | _SIGNING | _WRAPPING,
     KeyType.GENERIC_SECRET: 0,
     KeyType.EC_EDWARDS: _SIGNING,
+    KeyType.ML_KEM: MechanismFlag.ENCAPSULATE | MechanismFlag.DECAPSULATE,
 }
 """
 Default capabilities for generating keys.
@@ -87,6 +89,13 @@ DEFAULT_DERIVE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
 }
 """
 Default mechanisms for key derivation
+"""
+
+DEFAULT_ENCAPSULATE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
+    KeyType.ML_KEM: Mechanism.ML_KEM,
+}
+"""
+Default mechanisms for KEM encapsulate/decapsulate (PKCS#11 v3.2+).
 """
 
 DEFAULT_PARAM_GENERATE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {

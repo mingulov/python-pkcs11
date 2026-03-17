@@ -35,9 +35,13 @@ cdef class lib(HasFuncList)
 
 cdef class HasFuncList:
     cdef CK_FUNCTION_LIST *funclist
+    cdef CK_FUNCTION_LIST_3_0 *funclist3   # NULL if module is v2.40 only
+    cdef CK_FUNCTION_LIST_3_2 *funclist32  # NULL if module is not v3.2+
 
     def __cinit__(self, *args, **kwargs):
         self.funclist = NULL
+        self.funclist3 = NULL
+        self.funclist32 = NULL
 
 
 cdef assertRV(rv) with gil:
@@ -409,12 +413,15 @@ cdef class Slot(HasFuncList, types.Slot):
     cdef CK_VERSION _cryptoki_version
 
     @staticmethod
-    cdef Slot make(CK_FUNCTION_LIST *funclist, CK_SLOT_ID slot_id, CK_SLOT_INFO info, CK_VERSION cryptoki_version):
+    cdef Slot make(CK_FUNCTION_LIST *funclist, CK_SLOT_ID slot_id, CK_SLOT_INFO info, CK_VERSION cryptoki_version,
+                   CK_FUNCTION_LIST_3_0 *funclist3=NULL, CK_FUNCTION_LIST_3_2 *funclist32=NULL):
         description = info.slotDescription[:sizeof(info.slotDescription)]
         manufacturer_id = info.manufacturerID[:sizeof(info.manufacturerID)]
 
         cdef Slot slot = Slot.__new__(Slot)
         slot.funclist = funclist
+        slot.funclist3 = funclist3
+        slot.funclist32 = funclist32
 
         slot.slot_id = slot_id
         slot.slot_description = _CK_UTF8CHAR_to_str(description)
@@ -532,6 +539,8 @@ cdef class Token(HasFuncList, types.Token):
 
         cdef Token token = Token.__new__(Token)
         token.funclist = slot.funclist
+        token.funclist3 = slot.funclist3
+        token.funclist32 = slot.funclist32
         token.slot = slot
         token.label = _CK_UTF8CHAR_to_str(label)
         token.serial = serial_number.rstrip()
@@ -951,6 +960,8 @@ cdef class Session(HasFuncList, types.Session):
         cdef Session session = Session.__new__(Session)
 
         session.funclist = token.funclist
+        session.funclist3 = token.funclist3
+        session.funclist32 = token.funclist32
         session.token = token
 
         session.handle = handle
@@ -1457,6 +1468,14 @@ cdef object make_object(Session session, CK_OBJECT_HANDLE handle) with gil:
                 except (AttributeTypeInvalid, AttributeSensitive, FunctionFailed):
                     continue
 
+        # Fetch v3.2 KEM attributes separately so they don't break v2.40 batch fetches
+        if session.funclist32 != NULL:
+            for key in (Attribute.ENCAPSULATE, Attribute.DECAPSULATE):
+                try:
+                    attributes[key] = wrapper[key]
+                except (AttributeTypeInvalid, AttributeSensitive, FunctionFailed, PKCS11Error):
+                    pass
+
         object_class = attributes.get(Attribute.CLASS, session.attribute_mapper)
         bases = (_CLASS_MAP[object_class],)
 
@@ -1475,6 +1494,18 @@ cdef object make_object(Session session, CK_OBJECT_HANDLE handle) with gil:
                     bases += (mixin,)
             except KeyError:
                 pass
+
+        # v3.2 KEM mixins — only when the v3.2 interface is available
+        if session.funclist32 != NULL:
+            for attribute, mixin in (
+                    (Attribute.ENCAPSULATE, EncapsulateMixin),
+                    (Attribute.DECAPSULATE, DecapsulateMixin),
+            ):
+                try:
+                    if attributes.get(attribute):
+                        bases += (mixin,)
+                except KeyError:
+                    pass
 
         bases += (Object,)
 
@@ -2019,6 +2050,116 @@ class DeriveMixin(types.DeriveMixin):
         return make_object(session, key)
 
 
+class EncapsulateMixin(types.EncapsulateMixin):
+    """Expand EncapsulateMixin with an implementation (PKCS#11 v3.2+)."""
+
+    def encapsulate_key(self, key_type,
+                        id=None, label=None,
+                        store=False, capabilities=None,
+                        mechanism=None, mechanism_param=None,
+                        template=None):
+
+        if not isinstance(key_type, KeyType):
+            raise ArgumentsBad("`key_type` must be KeyType.")
+
+        if capabilities is None:
+            try:
+                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
+            except KeyError:
+                raise ArgumentsBad("No default capabilities for this key "
+                                   "type. Please specify `capabilities`.")
+
+        mech = MechanismWithParam(self.key_type, DEFAULT_ENCAPSULATE_MECHANISMS, mechanism, mechanism_param)
+
+        cdef Session session = self.session
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("encapsulate_key requires PKCS#11 v3.2 interface")
+
+        template_ = session.attribute_mapper.secret_key_template(
+            capabilities=capabilities, id_=id, label=label, store=store,
+        )
+        template_[Attribute.KEY_TYPE] = key_type
+        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
+        cdef CK_MECHANISM *mech_data = mech.data
+        cdef CK_OBJECT_HANDLE pub_key = self.handle
+        cdef CK_ATTRIBUTE *attr_data = attrs.data
+        cdef CK_ULONG attr_count = attrs.count
+        cdef CK_ULONG ct_len
+        cdef CK_OBJECT_HANDLE key
+        cdef CK_RV retval
+
+        # First call: determine ciphertext length
+        with nogil:
+            retval = session.funclist32.C_EncapsulateKey(
+                session.handle, mech_data, pub_key,
+                attr_data, attr_count,
+                NULL, &ct_len, &key)
+        assertRV(retval)
+
+        cdef CK_BYTE [:] ct_buf = CK_BYTE_buffer(ct_len)
+
+        # Second call: retrieve ciphertext and key handle
+        with nogil:
+            retval = session.funclist32.C_EncapsulateKey(
+                session.handle, mech_data, pub_key,
+                attr_data, attr_count,
+                &ct_buf[0], &ct_len, &key)
+        assertRV(retval)
+
+        return bytes(ct_buf[:ct_len]), make_object(session, key)
+
+
+class DecapsulateMixin(types.DecapsulateMixin):
+    """Expand DecapsulateMixin with an implementation (PKCS#11 v3.2+)."""
+
+    def decapsulate_key(self, key_type, ciphertext,
+                        id=None, label=None,
+                        store=False, capabilities=None,
+                        mechanism=None, mechanism_param=None,
+                        template=None):
+
+        if not isinstance(key_type, KeyType):
+            raise ArgumentsBad("`key_type` must be KeyType.")
+
+        if capabilities is None:
+            try:
+                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
+            except KeyError:
+                raise ArgumentsBad("No default capabilities for this key "
+                                   "type. Please specify `capabilities`.")
+
+        mech = MechanismWithParam(self.key_type, DEFAULT_ENCAPSULATE_MECHANISMS, mechanism, mechanism_param)
+
+        cdef Session session = self.session
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("decapsulate_key requires PKCS#11 v3.2 interface")
+
+        template_ = session.attribute_mapper.secret_key_template(
+            capabilities=capabilities, id_=id, label=label, store=store,
+        )
+        template_[Attribute.KEY_TYPE] = key_type
+        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
+        cdef CK_MECHANISM *mech_data = mech.data
+        cdef CK_OBJECT_HANDLE priv_key = self.handle
+        cdef CK_BYTE *ct_ptr = ciphertext
+        cdef CK_ULONG ct_len = <CK_ULONG> len(ciphertext)
+        cdef CK_ATTRIBUTE *attr_data = attrs.data
+        cdef CK_ULONG attr_count = attrs.count
+        cdef CK_OBJECT_HANDLE key
+        cdef CK_RV retval
+
+        with nogil:
+            retval = session.funclist32.C_DecapsulateKey(
+                session.handle, mech_data, priv_key,
+                attr_data, attr_count,
+                ct_ptr, ct_len, &key)
+        assertRV(retval)
+
+        return make_object(session, key)
+
+
 _CLASS_MAP = {
     ObjectClass.SECRET_KEY: SecretKey,
     ObjectClass.PUBLIC_KEY: PublicKey,
@@ -2030,6 +2171,7 @@ _CLASS_MAP = {
 cdef extern from "../extern/load_module.c":
     ctypedef struct P11_HANDLE:
         void *get_function_list_ptr
+        void *get_interface_ptr   # NULL if module doesn't support C_GetInterface
 
     object p11_error()
     P11_HANDLE* p11_open(object path_str)
@@ -2051,25 +2193,22 @@ cdef class lib(HasFuncList):
     cdef CK_VERSION _cryptoki_version
     cdef CK_VERSION _library_version
     cdef P11_HANDLE *_p11_handle
+    cdef str _interface_version  # negotiated: "2.40", "3.0", "3.1", or "3.2"
 
-    cdef _load_pkcs11_lib(self, so) with gil:
-        """Load a PKCS#11 library, and extract function calls.
+    cdef _load_pkcs11_lib(self, so, requested_interface) with gil:
+        """Load a PKCS#11 library and negotiate the interface version.
 
-        This method will dynamically load a PKCS11 library, and attempt to
-        resolve the symbol 'C_GetFunctionList()'. Once found, the entry point
-        is called to populate an internal table of function pointers.
+        Tries C_GetInterface first (v3.0+); falls back to C_GetFunctionList
+        (v2.40) when C_GetInterface is not exported by the module.
 
-        This is a private method, and must never be called directly.
-        Called when a new lib class is instantiated.
-
-        :param so: the path to a valid PKCS#11 library
-        :type so: str
+        :param so: path to a valid PKCS#11 shared library
+        :param requested_interface: "auto", "2.40", "3.0", "3.1", or "3.2"
         :raises: PKCS11Error
-        :rtype: None
         """
-
-        # to keep a pointer to the C_GetFunctionList address returned by dlsym()
         cdef C_GetFunctionList_ptr populate_function_list
+        cdef C_GetInterface_ptr get_interface
+        cdef CK_INTERFACE *iface = NULL
+        cdef CK_VERSION req_version
         cdef CK_RV retval
 
         cdef P11_HANDLE *handle = p11_open(so)
@@ -2079,17 +2218,61 @@ cdef class lib(HasFuncList):
                 raise PKCS11Error(f"OS exception while loading {so}: {err}")
             else:
                 raise PKCS11Error(f"Unknown exception while loading {so}")
-        populate_function_list = <C_GetFunctionList_ptr> handle.get_function_list_ptr
         self._p11_handle = handle
 
-        assertRV(populate_function_list(&self.funclist))
+        # --- Attempt v3.0+ interface negotiation via C_GetInterface ---
+        if handle.get_interface_ptr != NULL and requested_interface != "2.40":
+            get_interface = <C_GetInterface_ptr> handle.get_interface_ptr
 
-    def __cinit__(self, so):
+            # Try versions in descending order unless a specific one is requested
+            versions_to_try = []
+            if requested_interface == "auto":
+                versions_to_try = [(3, 2), (3, 1), (3, 0)]
+            elif requested_interface == "3.2":
+                versions_to_try = [(3, 2)]
+            elif requested_interface == "3.1":
+                versions_to_try = [(3, 1)]
+            elif requested_interface == "3.0":
+                versions_to_try = [(3, 0)]
+
+            for major, minor in versions_to_try:
+                req_version.major = major
+                req_version.minor = minor
+                retval = get_interface(b"PKCS 11", &req_version, &iface, 0)
+                if retval == CKR_OK and iface != NULL:
+                    if major == 3 and minor == 2:
+                        self.funclist32 = <CK_FUNCTION_LIST_3_2 *> iface.pFunctionList
+                        self.funclist3 = <CK_FUNCTION_LIST_3_0 *> iface.pFunctionList
+                        self.funclist = <CK_FUNCTION_LIST *> iface.pFunctionList
+                        self._interface_version = "3.2"
+                    elif major == 3 and minor == 1:
+                        self.funclist3 = <CK_FUNCTION_LIST_3_0 *> iface.pFunctionList
+                        self.funclist = <CK_FUNCTION_LIST *> iface.pFunctionList
+                        self._interface_version = "3.1"
+                    else:  # 3.0
+                        self.funclist3 = <CK_FUNCTION_LIST_3_0 *> iface.pFunctionList
+                        self.funclist = <CK_FUNCTION_LIST *> iface.pFunctionList
+                        self._interface_version = "3.0"
+                    return
+                iface = NULL
+
+        # --- Fall back to v2.40 via C_GetFunctionList ---
+        if requested_interface not in ("auto", "2.40"):
+            raise PKCS11Error(
+                f"Module does not support interface v{requested_interface}; "
+                f"C_GetInterface returned no matching interface"
+            )
+        populate_function_list = <C_GetFunctionList_ptr> handle.get_function_list_ptr
+        assertRV(populate_function_list(&self.funclist))
+        self._interface_version = "2.40"
+
+    def __cinit__(self, so, interface="auto"):
         cdef CK_RV retval
         self._p11_handle = NULL
-        self._load_pkcs11_lib(so)
+        self._interface_version = "2.40"
+        self._load_pkcs11_lib(so, interface)
         self.initialized = False
-        # at this point, _funclist contains all function pointers to the library
+        # at this point, funclist (and optionally funclist3/funclist32) are set
 
     cpdef initialize(self):
         cdef CK_RV retval
@@ -2114,7 +2297,7 @@ cdef class lib(HasFuncList):
             self.finalize()
             self.initialize()
 
-    def __init__(self, so):
+    def __init__(self, so, interface="auto"):
         self.so = so
         cdef CK_INFO info
         cdef CK_RV retval
@@ -2142,6 +2325,14 @@ cdef class lib(HasFuncList):
     def cryptoki_version(self):
         """PKCS#11 (cryptoki) API version (:class:`tuple`)."""
         return _CK_VERSION_to_tuple(self._cryptoki_version)
+
+    @property
+    def interface_version(self):
+        """Negotiated PKCS#11 interface version (:class:`str`).
+
+        One of ``"2.40"``, ``"3.0"``, ``"3.1"``, or ``"3.2"``.
+        """
+        return self._interface_version
 
     def __str__(self):
         return '\n'.join((
@@ -2188,7 +2379,8 @@ cdef class lib(HasFuncList):
             assertRV(retval)
 
             slots.append(
-                Slot.make(self.funclist, slot_id, info, self._cryptoki_version)
+                Slot.make(self.funclist, slot_id, info, self._cryptoki_version,
+                          self.funclist3, self.funclist32)
             )
 
         return slots

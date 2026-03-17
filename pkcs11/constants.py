@@ -181,6 +181,10 @@ class Attribute(IntEnum):
     VERIFY_RECOVER = 0x0000010B
     DERIVE = 0x0000010C
     """Key supports key derivation (:class:`bool`)."""
+    ENCAPSULATE = 0x00000633
+    """Key supports KEM encapsulation (PKCS#11 v3.2, :class:`bool`)."""
+    DECAPSULATE = 0x00000634
+    """Key supports KEM decapsulation (PKCS#11 v3.2, :class:`bool`)."""
     START_DATE = 0x00000110
     """Start date for the object's validity (:class:`datetime.date`)."""
     END_DATE = 0x00000111
@@ -396,6 +400,10 @@ class MechanismFlag(IntFlag):
     """Can unwrap a key for import."""
     DERIVE = 0x00080000
     """Can derive a key from another key."""
+    ENCAPSULATE = 0x10000000
+    """Can encapsulate a key (KEM, PKCS#11 v3.2)."""
+    DECAPSULATE = 0x20000000
+    """Can decapsulate a key (KEM, PKCS#11 v3.2)."""
 
     EC_F_P = 0x00100000
     EC_F_2M = 0x00200000

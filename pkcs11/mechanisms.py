@@ -117,6 +117,10 @@ class KeyType(IntEnum):
     CHACHA20 = 0x00000033
     POLY1305 = 0x00000035
 
+    # PKCS#11 v3.2 — PQC / KEM key types
+    ML_KEM = 0x00000049
+    """ML-KEM (CRYSTALS-Kyber) post-quantum KEM key (FIPS 203)."""
+
     _VENDOR_DEFINED = 0x80000000
 
     def __repr__(self) -> str:
@@ -814,6 +818,12 @@ class Mechanism(IntEnum):
     ECDH_AES_KEY_WRAP = 0x00001053
 
     # Note: SHA3 KEY_DERIVATION already defined above (0x397-0x39A)
+
+    # PKCS#11 v3.2 — ML-KEM (CRYSTALS-Kyber, FIPS 203) post-quantum KEM
+    ML_KEM_KEY_PAIR_GEN = 0x0000000F
+    """Generate an ML-KEM key pair."""
+    ML_KEM = 0x00000017
+    """ML-KEM encapsulate/decapsulate (C_EncapsulateKey / C_DecapsulateKey)."""
 
     _VENDOR_DEFINED = 0x80000000
 
