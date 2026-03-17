@@ -15,7 +15,7 @@ from threading import RLock
 
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 from cpython.bytes cimport PyBytes_FromStringAndSize
-from libc.string cimport memcpy
+from libc.string cimport memcpy, strlen
 
 from pkcs11 import types
 from pkcs11.attributes import AttributeMapper
@@ -2373,7 +2373,7 @@ cdef class lib(HasFuncList):
                 iface_ptr = &ifaces[i]
                 if iface_ptr.pInterfaceName == NULL or iface_ptr.pFunctionList == NULL:
                     continue
-                name = (<bytes> iface_ptr.pInterfaceName[:64]).rstrip(b'\x00 ').decode('utf-8', errors='replace')
+                name = (<bytes> iface_ptr.pInterfaceName[:strlen(<char *> iface_ptr.pInterfaceName)]).decode('utf-8', errors='replace').strip()
                 fl_ptr = <CK_FUNCTION_LIST *> iface_ptr.pFunctionList
                 result.append((name, fl_ptr.version.major, fl_ptr.version.minor))
             return result
