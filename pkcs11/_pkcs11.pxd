@@ -1204,6 +1204,51 @@ cdef extern from '../extern/cryptoki.h':
                                CK_BYTE *pCiphertext,
                                CK_ULONG ulCiphertextLen,
                                CK_OBJECT_HANDLE *phKey) nogil
+        ## C_VerifySignature* — stateless signature verification (v3.2)
+        ## Signature is embedded in mechanism_param; data is streamed separately.
+        CK_RV C_VerifySignatureInit(CK_SESSION_HANDLE session,
+                                    CK_MECHANISM *mechanism,
+                                    CK_OBJECT_HANDLE hKey) nogil
+        CK_RV C_VerifySignature(CK_SESSION_HANDLE session,
+                                CK_BYTE *data,
+                                CK_ULONG dataLen) nogil
+        CK_RV C_VerifySignatureUpdate(CK_SESSION_HANDLE session,
+                                      CK_BYTE *data,
+                                      CK_ULONG dataLen) nogil
+        CK_RV C_VerifySignatureFinal(CK_SESSION_HANDLE session) nogil
+        ## Remaining v3.2 functions (stub layout to preserve correct struct offsets)
+        CK_RV C_GetSessionValidationFlags(CK_SESSION_HANDLE session,
+                                          CK_FLAGS flags,
+                                          CK_FLAGS *pFlags) nogil
+        CK_RV C_AsyncComplete(CK_SESSION_HANDLE session,
+                              CK_UTF8CHAR *pOperation,
+                              CK_ULONG ulOperationLen) nogil
+        CK_RV C_AsyncGetID(CK_SESSION_HANDLE session,
+                           CK_UTF8CHAR *pOperation,
+                           CK_ULONG *pulOperationLen) nogil
+        CK_RV C_AsyncJoin(CK_SESSION_HANDLE session,
+                          CK_UTF8CHAR *pOperation,
+                          CK_ULONG ulOperationLen,
+                          CK_BYTE *pData,
+                          CK_ULONG ulDataLen) nogil
+        CK_RV C_WrapKeyAuthenticated(CK_SESSION_HANDLE session,
+                                     CK_MECHANISM *mechanism,
+                                     CK_OBJECT_HANDLE hWrappingKey,
+                                     CK_OBJECT_HANDLE hKey,
+                                     CK_BYTE *pAad, CK_ULONG ulAadLen,
+                                     CK_BYTE *pWrappedKey,
+                                     CK_ULONG *pulWrappedKeyLen,
+                                     CK_BYTE *pTag, CK_ULONG *pulTagLen) nogil
+        CK_RV C_UnwrapKeyAuthenticated(CK_SESSION_HANDLE session,
+                                       CK_MECHANISM *mechanism,
+                                       CK_OBJECT_HANDLE hUnwrappingKey,
+                                       CK_BYTE *pWrappedKey,
+                                       CK_ULONG ulWrappedKeyLen,
+                                       CK_BYTE *pAad, CK_ULONG ulAadLen,
+                                       CK_BYTE *pTag, CK_ULONG ulTagLen,
+                                       CK_ATTRIBUTE *templ,
+                                       CK_ULONG ulAttributeCount,
+                                       CK_OBJECT_HANDLE *phKey) nogil
 
 # The only external API call that must be defined in a PKCS#11 library
 # All other APIs are taken from the CK_FUNCTION_LIST table

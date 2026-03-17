@@ -2334,6 +2334,51 @@ cdef class lib(HasFuncList):
         """
         return self._interface_version
 
+    def get_interface_list(self):
+        """Return list of supported interface ``(name, major, minor)`` tuples.
+
+        Calls ``C_GetInterfaceList`` (PKCS#11 v3.0+).  Returns an empty list
+        when the module is v2.40 only.
+
+        :rtype: list[tuple[str, int, int]]
+        """
+        if self.funclist3 == NULL:
+            return []
+
+        cdef CK_ULONG count
+        cdef CK_RV retval
+        cdef CK_INTERFACE *ifaces
+        cdef CK_INTERFACE *iface_ptr
+        cdef CK_FUNCTION_LIST *fl_ptr
+        cdef CK_ULONG i
+
+        with nogil:
+            retval = self.funclist3.C_GetInterfaceList(NULL, &count)
+        if retval != CKR_OK or count == 0:
+            return []
+
+        ifaces = <CK_INTERFACE *> PyMem_Malloc(count * sizeof(CK_INTERFACE))
+        if ifaces == NULL:
+            raise MemoryError()
+
+        try:
+            with nogil:
+                retval = self.funclist3.C_GetInterfaceList(ifaces, &count)
+            if retval != CKR_OK:
+                return []
+
+            result = []
+            for i in range(count):
+                iface_ptr = &ifaces[i]
+                if iface_ptr.pInterfaceName == NULL or iface_ptr.pFunctionList == NULL:
+                    continue
+                name = (<bytes> iface_ptr.pInterfaceName[:64]).rstrip(b'\x00 ').decode('utf-8', errors='replace')
+                fl_ptr = <CK_FUNCTION_LIST *> iface_ptr.pFunctionList
+                result.append((name, fl_ptr.version.major, fl_ptr.version.minor))
+            return result
+        finally:
+            PyMem_Free(ifaces)
+
     def __str__(self):
         return '\n'.join((
             "Library: %s" % self.so,
