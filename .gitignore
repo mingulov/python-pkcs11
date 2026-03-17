@@ -1,6 +1,7 @@
 *.so
 *.c
 __pycache__
+.claude/
 .idea/
 /build
 /dist/
