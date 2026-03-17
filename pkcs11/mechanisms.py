@@ -914,6 +914,23 @@ class MGF(IntEnum):
         return "<MGF.%s>" % self.name
 
 
+class PBKDF2PRF(IntEnum):
+    """
+    PKCS#5 PBKDF2 pseudo-random function types.
+
+    Used with :attr:`Mechanism.PKCS5_PBKD2` mechanism_param ``prf`` field.
+    """
+
+    HMAC_SHA1 = 0x00000001
+    HMAC_GOSTR3411 = 0x00000002
+    HMAC_SHA224 = 0x00000003
+    HMAC_SHA256 = 0x00000004
+    HMAC_SHA384 = 0x00000005
+    HMAC_SHA512 = 0x00000006
+    HMAC_SHA512_224 = 0x00000007
+    HMAC_SHA512_256 = 0x00000008
+
+
 class GCMParams:
     """Parameters for AES-GCM mode."""
 

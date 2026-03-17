@@ -300,6 +300,35 @@ cdef extern from '../extern/cryptoki.h':
         CKF_HKDF_SALT_DATA = 0x00000002
         CKF_HKDF_SALT_KEY  = 0x00000004
 
+    # PKCS5 PBKDF2 salt source type (pkcs11t.h)
+    cdef enum:
+        CKZ_SALT_SPECIFIED = 0x00000001
+
+    # PKCS5 PBKDF2 pseudo-random function types (pkcs11t.h)
+    cdef enum:
+        CKP_PKCS5_PBKD2_HMAC_SHA1       = 0x00000001
+        CKP_PKCS5_PBKD2_HMAC_GOSTR3411  = 0x00000002
+        CKP_PKCS5_PBKD2_HMAC_SHA224     = 0x00000003
+        CKP_PKCS5_PBKD2_HMAC_SHA256     = 0x00000004
+        CKP_PKCS5_PBKD2_HMAC_SHA384     = 0x00000005
+        CKP_PKCS5_PBKD2_HMAC_SHA512     = 0x00000006
+        CKP_PKCS5_PBKD2_HMAC_SHA512_224 = 0x00000007
+        CKP_PKCS5_PBKD2_HMAC_SHA512_256 = 0x00000008
+
+    # CK_PKCS5_PBKD2_PARAMS2 — corrected form (v2.40 errata / v3.0+).
+    # Uses CK_ULONG for ulPasswordLen (not CK_ULONG_PTR as in the
+    # original CK_PKCS5_PBKD2_PARAMS which had a spec bug).
+    ctypedef struct CK_PKCS5_PBKD2_PARAMS2:
+        CK_ULONG saltSource
+        CK_BYTE *pSaltSourceData
+        CK_ULONG ulSaltSourceDataLen
+        CK_ULONG iterations
+        CK_ULONG prf
+        CK_BYTE *pPrfData
+        CK_ULONG ulPrfDataLen
+        CK_UTF8CHAR *pPassword
+        CK_ULONG ulPasswordLen
+
     ctypedef struct CK_HKDF_PARAMS:
         CK_BBOOL bExtract
         CK_BBOOL bExpand

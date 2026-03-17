@@ -182,6 +182,7 @@ cdef class MechanismWithParam:
         cdef CK_CCM_PARAMS *ccm_params
         cdef CK_SALSA20_CHACHA20_POLY1305_PARAMS *chacha_poly_params
         cdef CK_HKDF_PARAMS *hkdf_params
+        cdef CK_PKCS5_PBKD2_PARAMS2 *pbkd2_params
 
         # Unpack mechanism parameters
 
@@ -382,6 +383,33 @@ cdef class MechanismWithParam:
             else:
                 hkdf_params.pInfo = NULL
                 hkdf_params.ulInfoLen = 0
+
+        elif mechanism == Mechanism.PKCS5_PBKD2:
+            paramlen = sizeof(CK_PKCS5_PBKD2_PARAMS2)
+            self.param = pbkd2_params = \
+                <CK_PKCS5_PBKD2_PARAMS2 *> PyMem_Malloc(paramlen)
+            # Accepts a dict with keys: password, salt, iterations, prf
+            # prf is a CKP_PKCS5_PBKD2_HMAC_* constant (int)
+            if isinstance(param, dict):
+                password = param['password']
+                if isinstance(password, str):
+                    password = password.encode('utf-8')
+                salt = param.get('salt', b'')
+                pbkd2_params.iterations = <CK_ULONG> param.get('iterations', 1000)
+                pbkd2_params.prf = <CK_ULONG> param.get('prf', CKP_PKCS5_PBKD2_HMAC_SHA256)
+            else:
+                (password, salt, iterations, prf) = param
+                if isinstance(password, str):
+                    password = password.encode('utf-8')
+                pbkd2_params.iterations = <CK_ULONG> iterations
+                pbkd2_params.prf = <CK_ULONG> prf
+            pbkd2_params.saltSource = CKZ_SALT_SPECIFIED
+            pbkd2_params.pSaltSourceData = <CK_BYTE *> salt
+            pbkd2_params.ulSaltSourceDataLen = <CK_ULONG> len(salt)
+            pbkd2_params.pPrfData = NULL
+            pbkd2_params.ulPrfDataLen = 0
+            pbkd2_params.pPassword = <CK_UTF8CHAR *> password
+            pbkd2_params.ulPasswordLen = <CK_ULONG> len(password)
 
         elif param is None:
             self.data.pParameter = NULL
@@ -1099,6 +1127,7 @@ cdef class Session(HasFuncList, types.Session):
         template_ = self.attribute_mapper.secret_key_template(
             capabilities=capabilities, id_=id, label=label, store=store,
         )
+        template_[Attribute.KEY_TYPE] = key_type
         # Build attributes
         if key_type not in (KeyType.DES2, KeyType.DES3, KeyType.GOST28147, KeyType.SEED):
             if key_length is None:
