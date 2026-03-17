@@ -177,6 +177,7 @@ cdef class MechanismWithParam:
         cdef CK_AES_CTR_PARAMS *aes_ctr_params
         cdef CK_CCM_PARAMS *ccm_params
         cdef CK_SALSA20_CHACHA20_POLY1305_PARAMS *chacha_poly_params
+        cdef CK_HKDF_PARAMS *hkdf_params
 
         # Unpack mechanism parameters
 
@@ -341,6 +342,42 @@ cdef class MechanismWithParam:
             else:
                 chacha_poly_params.pAAD = NULL
                 chacha_poly_params.ulAADLen = 0
+
+        elif mechanism in (Mechanism.HKDF_DERIVE,
+                           Mechanism.HKDF_DATA,
+                           Mechanism.HKDF_KEY_GEN):
+            paramlen = sizeof(CK_HKDF_PARAMS)
+            self.param = hkdf_params = <CK_HKDF_PARAMS *> PyMem_Malloc(paramlen)
+            # HKDF params: (hash_mechanism, salt, info) or dict
+            # bExtract=True, bExpand=True for standard extract-then-expand
+            if isinstance(param, dict):
+                hkdf_params.bExtract = <CK_BBOOL> param.get('extract', True)
+                hkdf_params.bExpand = <CK_BBOOL> param.get('expand', True)
+                hkdf_params.prfHashMechanism = <CK_MECHANISM_TYPE> param.get('hash', param.get('prf_hash', 0))
+                salt = param.get('salt', b'')
+                info = param.get('info', b'')
+            else:
+                (prf_hash, salt, info) = param
+                hkdf_params.bExtract = <CK_BBOOL> True
+                hkdf_params.bExpand = <CK_BBOOL> True
+                hkdf_params.prfHashMechanism = <CK_MECHANISM_TYPE> prf_hash
+
+            if salt is not None and len(salt) > 0:
+                hkdf_params.ulSaltType = 0x00000002  # CKF_HKDF_SALT_DATA
+                hkdf_params.pSalt = <CK_BYTE *> salt
+                hkdf_params.ulSaltLen = <CK_ULONG> len(salt)
+            else:
+                hkdf_params.ulSaltType = 0x00000001  # CKF_HKDF_SALT_NULL
+                hkdf_params.pSalt = NULL
+                hkdf_params.ulSaltLen = 0
+            hkdf_params.hSaltKey = 0  # Not using key-based salt
+
+            if info is not None and len(info) > 0:
+                hkdf_params.pInfo = <CK_BYTE *> info
+                hkdf_params.ulInfoLen = <CK_ULONG> len(info)
+            else:
+                hkdf_params.pInfo = NULL
+                hkdf_params.ulInfoLen = 0
 
         elif param is None:
             self.data.pParameter = NULL

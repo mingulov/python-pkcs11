@@ -294,6 +294,17 @@ cdef extern from '../extern/cryptoki.h':
         CK_BYTE *pAAD
         CK_ULONG ulAADLen
 
+    ctypedef struct CK_HKDF_PARAMS:
+        CK_BBOOL bExtract
+        CK_BBOOL bExpand
+        CK_MECHANISM_TYPE prfHashMechanism
+        CK_ULONG ulSaltType
+        CK_BYTE *pSalt
+        CK_ULONG ulSaltLen
+        CK_OBJECT_HANDLE hSaltKey
+        CK_BYTE *pInfo
+        CK_ULONG ulInfoLen
+
     cdef struct CK_FUNCTION_LIST:
         CK_VERSION version
         ## pointers to library functions are stored here
