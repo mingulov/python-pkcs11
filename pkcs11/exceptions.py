@@ -408,3 +408,28 @@ class WrappingKeySizeRange(PKCS11Error):
 
 class WrappingKeyTypeInconsistent(PKCS11Error):
     pass
+
+
+class ActionProhibited(PKCS11Error):
+    """Action prohibited by object's CKA_COPYABLE/CKA_MODIFIABLE/CKA_DESTROYABLE."""
+    pass
+
+
+class CurveNotSupported(PKCS11Error):
+    """The token does not support the requested elliptic curve."""
+    pass
+
+
+class KeyFunctionNotPermitted(PKCS11Error):
+    """Key usage policy does not permit the requested operation."""
+    pass
+
+
+class OperationNotValidated(PKCS11Error):
+    """Operation has not been validated (PKCS#11 v3.2 FIPS mode)."""
+    pass
+
+
+class ParameterSetNotSupported(PKCS11Error):
+    """Requested PQC parameter set is not supported (PKCS#11 v3.2)."""
+    pass

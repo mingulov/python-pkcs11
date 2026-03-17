@@ -31,6 +31,8 @@ class UserType(IntEnum):
     SO = 0
     """Security officer."""
     USER = 1
+    CONTEXT_SPECIFIC = 2
+    """Context-specific login for PIN re-authentication (CKU_CONTEXT_SPECIFIC)."""
 
 
 class ObjectClass(IntEnum):
@@ -55,6 +57,10 @@ class ObjectClass(IntEnum):
     MECHANISM = 0x00000007
     OTP_KEY = 0x00000008
     PROFILE = 0x00000009
+    VALIDATION = 0x0000000A
+    """Validation object (PKCS#11 v3.2)."""
+    TRUST = 0x0000000B
+    """Trust object (PKCS#11 v3.2)."""
 
     _VENDOR_DEFINED = 0x80000000
 

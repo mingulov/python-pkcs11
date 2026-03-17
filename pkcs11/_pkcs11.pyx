@@ -183,10 +183,18 @@ cdef class MechanismWithParam:
         cdef CK_SALSA20_CHACHA20_POLY1305_PARAMS *chacha_poly_params
         cdef CK_HKDF_PARAMS *hkdf_params
         cdef CK_PKCS5_PBKD2_PARAMS2 *pbkd2_params
+        cdef CK_XEDDSA_PARAMS *xeddsa_params
+        cdef CK_ECDH_AES_KEY_WRAP_PARAMS *ecdh_aes_params
+        cdef CK_RSA_AES_KEY_WRAP_PARAMS *rsa_aes_params
+        cdef CK_CHACHA20_PARAMS *chacha20_params
+        cdef CK_SALSA20_PARAMS *salsa20_params
+        cdef CK_DES_CBC_ENCRYPT_DATA_PARAMS *des_cbc_params
 
         # Unpack mechanism parameters
 
-        if mechanism == Mechanism.AES_ECB_ENCRYPT_DATA:
+        if mechanism in (Mechanism.AES_ECB_ENCRYPT_DATA,
+                         Mechanism.DES_ECB_ENCRYPT_DATA,
+                         Mechanism.DES3_ECB_ENCRYPT_DATA):
             paramlen = sizeof(CK_KEY_DERIVATION_STRING_DATA)
             self.param = aes_ecb_params = \
                 <CK_KEY_DERIVATION_STRING_DATA *> PyMem_Malloc(paramlen)
@@ -257,6 +265,12 @@ cdef class MechanismWithParam:
                 eddsa_params.pContextData = context_data
                 eddsa_params.ulContextDataLen = <CK_ULONG> len(context_data)
 
+        elif mechanism == Mechanism.XEDDSA and param is not None:
+            paramlen = sizeof(CK_XEDDSA_PARAMS)
+            self.param = xeddsa_params = \
+                <CK_XEDDSA_PARAMS *> PyMem_Malloc(paramlen)
+            xeddsa_params.hash = <CK_XEDDSA_HASH_TYPE> int(param)
+
         elif mechanism in (
                 Mechanism.ECDH1_DERIVE,
                 Mechanism.ECDH1_COFACTOR_DERIVE):
@@ -284,6 +298,16 @@ cdef class MechanismWithParam:
             aes_cbc_params.iv = iv[:16]
             aes_cbc_params.pData = <CK_BYTE *> data
             aes_cbc_params.length = <CK_ULONG> len(data)
+
+        elif mechanism in (Mechanism.DES_CBC_ENCRYPT_DATA,
+                          Mechanism.DES3_CBC_ENCRYPT_DATA):
+            paramlen = sizeof(CK_DES_CBC_ENCRYPT_DATA_PARAMS)
+            self.param = des_cbc_params = \
+                <CK_DES_CBC_ENCRYPT_DATA_PARAMS *> PyMem_Malloc(paramlen)
+            (iv, data) = param
+            des_cbc_params.iv = iv[:8]
+            des_cbc_params.pData = <CK_BYTE *> data
+            des_cbc_params.length = <CK_ULONG> len(data)
 
         elif mechanism == Mechanism.AES_GCM:
             paramlen = sizeof(CK_GCM_PARAMS)
@@ -410,6 +434,77 @@ cdef class MechanismWithParam:
             pbkd2_params.ulPrfDataLen = 0
             pbkd2_params.pPassword = <CK_UTF8CHAR *> password
             pbkd2_params.ulPasswordLen = <CK_ULONG> len(password)
+
+        elif mechanism == Mechanism.ECDH_AES_KEY_WRAP:
+            paramlen = sizeof(CK_ECDH_AES_KEY_WRAP_PARAMS)
+            self.param = ecdh_aes_params = \
+                <CK_ECDH_AES_KEY_WRAP_PARAMS *> PyMem_Malloc(paramlen)
+            if isinstance(param, dict):
+                ecdh_aes_params.ulAESKeyBits = <CK_ULONG> param.get('aes_key_bits', 256)
+                ecdh_aes_params.kdf = <CK_EC_KDF_TYPE> param.get('kdf', 0)
+                shared_data = param.get('shared_data', None)
+            else:
+                (aes_key_bits, kdf, shared_data) = param
+                ecdh_aes_params.ulAESKeyBits = <CK_ULONG> aes_key_bits
+                ecdh_aes_params.kdf = <CK_EC_KDF_TYPE> kdf
+            if shared_data is not None and len(shared_data) > 0:
+                ecdh_aes_params.pSharedData = <CK_BYTE *> shared_data
+                ecdh_aes_params.ulSharedDataLen = <CK_ULONG> len(shared_data)
+            else:
+                ecdh_aes_params.pSharedData = NULL
+                ecdh_aes_params.ulSharedDataLen = 0
+
+        elif mechanism == Mechanism.RSA_AES_KEY_WRAP:
+            # Allocate outer struct + embedded OAEP params as contiguous block
+            paramlen = sizeof(CK_RSA_AES_KEY_WRAP_PARAMS) + sizeof(CK_RSA_PKCS_OAEP_PARAMS)
+            self.param = rsa_aes_params = \
+                <CK_RSA_AES_KEY_WRAP_PARAMS *> PyMem_Malloc(paramlen)
+            oaep_params = <CK_RSA_PKCS_OAEP_PARAMS *>(
+                <char *>rsa_aes_params + sizeof(CK_RSA_AES_KEY_WRAP_PARAMS))
+            rsa_aes_params.pOAEPParams = oaep_params
+            if isinstance(param, dict):
+                rsa_aes_params.ulAESKeyBits = <CK_ULONG> param.get('aes_key_bits', 256)
+                oaep_param = param.get('oaep_params', None)
+            else:
+                (aes_key_bits, oaep_param) = param
+                rsa_aes_params.ulAESKeyBits = <CK_ULONG> aes_key_bits
+            if oaep_param is None:
+                oaep_param = DEFAULT_MECHANISM_PARAMS[Mechanism.RSA_PKCS_OAEP]
+            (oaep_params.hashAlg, oaep_params.mgf, source_data) = oaep_param
+            oaep_params.source = 0x00000001  # CKZ_DATA_SPECIFIED
+            if source_data is not None:
+                oaep_params.pSourceData = <CK_BYTE *> source_data
+                oaep_params.ulSourceDataLen = <CK_ULONG> len(source_data)
+            else:
+                oaep_params.pSourceData = NULL
+                oaep_params.ulSourceDataLen = 0
+
+        elif mechanism == Mechanism.CHACHA20:
+            paramlen = sizeof(CK_CHACHA20_PARAMS)
+            self.param = chacha20_params = \
+                <CK_CHACHA20_PARAMS *> PyMem_Malloc(paramlen)
+            if isinstance(param, dict):
+                block_counter = param.get('block_counter', b'\x00\x00\x00\x00')
+                nonce = param['nonce']
+            else:
+                (block_counter, nonce) = param
+            chacha20_params.pBlockCounter = <CK_BYTE *> block_counter
+            chacha20_params.blockCounterBits = <CK_ULONG>(len(block_counter) * 8)
+            chacha20_params.pNonce = <CK_BYTE *> nonce
+            chacha20_params.ulNonceBits = <CK_ULONG>(len(nonce) * 8)
+
+        elif mechanism == Mechanism.SALSA20:
+            paramlen = sizeof(CK_SALSA20_PARAMS)
+            self.param = salsa20_params = \
+                <CK_SALSA20_PARAMS *> PyMem_Malloc(paramlen)
+            if isinstance(param, dict):
+                block_counter = param.get('block_counter', b'\x00\x00\x00\x00\x00\x00\x00\x00')
+                nonce = param['nonce']
+            else:
+                (block_counter, nonce) = param
+            salsa20_params.pBlockCounter = <CK_BYTE *> block_counter
+            salsa20_params.pNonce = <CK_BYTE *> nonce
+            salsa20_params.ulNonceBits = <CK_ULONG>(len(nonce) * 8)
 
         elif param is None:
             self.data.pParameter = NULL

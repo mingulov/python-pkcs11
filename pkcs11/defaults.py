@@ -22,6 +22,7 @@ DEFAULT_GENERATE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.RSA: Mechanism.RSA_PKCS_KEY_PAIR_GEN,
     KeyType.X9_42_DH: Mechanism.X9_42_DH_KEY_PAIR_GEN,
     KeyType.EC_EDWARDS: Mechanism.EC_EDWARDS_KEY_PAIR_GEN,
+    KeyType.EC_MONTGOMERY: Mechanism.EC_MONTGOMERY_KEY_PAIR_GEN,
     KeyType.GENERIC_SECRET: Mechanism.GENERIC_SECRET_KEY_GEN,
     KeyType.ML_KEM: Mechanism.ML_KEM_KEY_PAIR_GEN,
     KeyType.ML_DSA: Mechanism.ML_DSA_KEY_PAIR_GEN,
@@ -45,6 +46,8 @@ DEFAULT_KEY_CAPABILITIES: Final[dict[KeyType, MechanismFlag | int]] = {
     KeyType.RSA: _ENCRYPTION | _SIGNING | _WRAPPING,
     KeyType.GENERIC_SECRET: 0,
     KeyType.EC_EDWARDS: _SIGNING,
+    KeyType.EC_MONTGOMERY: MechanismFlag.DERIVE,
+    KeyType.X9_42_DH: MechanismFlag.DERIVE,
     KeyType.ML_KEM: MechanismFlag.ENCAPSULATE | MechanismFlag.DECAPSULATE,
     KeyType.ML_DSA: _SIGNING,
     KeyType.SLH_DSA: _SIGNING,
@@ -91,6 +94,7 @@ Default mechanism for wrap/unwrap.
 DEFAULT_DERIVE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.DH: Mechanism.DH_PKCS_DERIVE,
     KeyType.EC: Mechanism.ECDH1_DERIVE,
+    KeyType.EC_MONTGOMERY: Mechanism.ECDH1_DERIVE,
     KeyType.X9_42_DH: Mechanism.X9_42_DH_DERIVE,
 }
 """

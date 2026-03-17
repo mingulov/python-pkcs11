@@ -141,6 +141,12 @@ cdef extern from '../extern/cryptoki.h':
 
         CKR_OPERATION_CANCEL_FAILED,
 
+        CKR_ACTION_PROHIBITED,
+        CKR_CURVE_NOT_SUPPORTED,
+        CKR_OPERATION_NOT_VALIDATED,
+        CKR_TOKEN_NOT_INITIALIZED,
+        CKR_PARAMETER_SET_NOT_SUPPORTED,
+
         CKR_VENDOR_DEFINED,
 
 
@@ -339,6 +345,43 @@ cdef extern from '../extern/cryptoki.h':
         CK_OBJECT_HANDLE hSaltKey
         CK_BYTE *pInfo
         CK_ULONG ulInfoLen
+
+    # CK_XEDDSA_PARAMS — XEdDSA signing (PKCS#11 v3.0+)
+    ctypedef CK_ULONG CK_XEDDSA_HASH_TYPE
+
+    ctypedef struct CK_XEDDSA_PARAMS:
+        CK_XEDDSA_HASH_TYPE hash
+
+    # CK_ECDH_AES_KEY_WRAP_PARAMS — ECDH-based AES key wrap
+    ctypedef struct CK_ECDH_AES_KEY_WRAP_PARAMS:
+        CK_ULONG ulAESKeyBits
+        CK_EC_KDF_TYPE kdf
+        CK_ULONG ulSharedDataLen
+        CK_BYTE *pSharedData
+
+    # CK_RSA_AES_KEY_WRAP_PARAMS — RSA+AES key wrap
+    ctypedef struct CK_RSA_AES_KEY_WRAP_PARAMS:
+        CK_ULONG ulAESKeyBits
+        CK_RSA_PKCS_OAEP_PARAMS *pOAEPParams
+
+    # CK_CHACHA20_PARAMS — ChaCha20 bare stream cipher
+    ctypedef struct CK_CHACHA20_PARAMS:
+        CK_BYTE *pBlockCounter
+        CK_ULONG blockCounterBits
+        CK_BYTE *pNonce
+        CK_ULONG ulNonceBits
+
+    # CK_SALSA20_PARAMS — Salsa20 bare stream cipher
+    ctypedef struct CK_SALSA20_PARAMS:
+        CK_BYTE *pBlockCounter
+        CK_BYTE *pNonce
+        CK_ULONG ulNonceBits
+
+    # CK_DES_CBC_ENCRYPT_DATA_PARAMS — DES/3DES CBC key derivation (8-byte IV)
+    ctypedef struct CK_DES_CBC_ENCRYPT_DATA_PARAMS:
+        CK_BYTE iv[8]
+        CK_BYTE *pData
+        CK_ULONG length
 
     cdef struct CK_FUNCTION_LIST:
         CK_VERSION version
@@ -1483,6 +1526,18 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
         exc = WrappingKeySizeRange()
     elif rv == CKR_WRAPPING_KEY_TYPE_INCONSISTENT:
         exc = WrappingKeyTypeInconsistent()
+    elif rv == CKR_ACTION_PROHIBITED:
+        exc = ActionProhibited()
+    elif rv == CKR_CURVE_NOT_SUPPORTED:
+        exc = CurveNotSupported()
+    elif rv == CKR_KEY_FUNCTION_NOT_PERMITTED:
+        exc = KeyFunctionNotPermitted()
+    elif rv == CKR_OPERATION_NOT_VALIDATED:
+        exc = OperationNotValidated()
+    elif rv == CKR_TOKEN_NOT_INITIALIZED:
+        exc = PKCS11Error("Token not initialized")
+    elif rv == CKR_PARAMETER_SET_NOT_SUPPORTED:
+        exc = ParameterSetNotSupported()
     else:
         exc = PKCS11Error("Unmapped error code %s" % hex(rv))
     return exc
