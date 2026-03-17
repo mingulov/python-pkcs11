@@ -106,6 +106,7 @@ class KeyType(IntEnum):
 
     # from version 3.0
     EC_EDWARDS = 0x00000040
+    EC_MONTGOMERY = 0x00000041
 
     _VENDOR_DEFINED = 0x80000000
 
@@ -146,6 +147,7 @@ class Mechanism(IntEnum):
 
     .. warning:: Consider using the more robust PKCS#1 OAEP.
     """
+    RSA_AES_KEY_WRAP = 0x00004004
     RSA_PKCS_TPM_1_1 = 0x00004001
     """
     .. warning:: Consider using the more robust PKCS#1 OAEP.
