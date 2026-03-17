@@ -280,6 +280,20 @@ cdef extern from '../extern/cryptoki.h':
        CK_ULONG ulContextDataLen
        CK_BYTE *pContextData
 
+    ctypedef struct CK_CCM_PARAMS:
+        CK_ULONG ulDataLen
+        CK_BYTE *pNonce
+        CK_ULONG ulNonceLen
+        CK_BYTE *pAAD
+        CK_ULONG ulAADLen
+        CK_ULONG ulMACLen
+
+    ctypedef struct CK_SALSA20_CHACHA20_POLY1305_PARAMS:
+        CK_BYTE *pNonce
+        CK_ULONG ulNonceLen
+        CK_BYTE *pAAD
+        CK_ULONG ulAADLen
+
     cdef struct CK_FUNCTION_LIST:
         CK_VERSION version
         ## pointers to library functions are stored here

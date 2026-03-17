@@ -175,6 +175,8 @@ cdef class MechanismWithParam:
         cdef CK_AES_CBC_ENCRYPT_DATA_PARAMS *aes_cbc_params
         cdef CK_GCM_PARAMS *gcm_params
         cdef CK_AES_CTR_PARAMS *aes_ctr_params
+        cdef CK_CCM_PARAMS *ccm_params
+        cdef CK_SALSA20_CHACHA20_POLY1305_PARAMS *chacha_poly_params
 
         # Unpack mechanism parameters
 
@@ -297,6 +299,44 @@ cdef class MechanismWithParam:
                 raise TypeError
             aes_ctr_params.ulCounterBits = (16 - len(param.nonce)) * 8
             aes_ctr_params.cb = param.nonce + b"\x00" * (15 - len(param.nonce)) + b"\x01"
+
+        elif mechanism == Mechanism.AES_CCM:
+            paramlen = sizeof(CK_CCM_PARAMS)
+            self.param = ccm_params = <CK_CCM_PARAMS *> PyMem_Malloc(paramlen)
+            # CCM params: (data_len, nonce, aad, mac_length) or dict
+            if isinstance(param, dict):
+                ccm_params.ulDataLen = <CK_ULONG> param.get('data_len', 0)
+                nonce = param.get('nonce', b'')
+                aad = param.get('associated_data', param.get('aad', b''))
+                ccm_params.ulMACLen = <CK_ULONG> param.get('mac_length', 16)
+            else:
+                (data_len, nonce, aad, mac_length) = param
+                ccm_params.ulDataLen = <CK_ULONG> data_len
+                ccm_params.ulMACLen = <CK_ULONG> mac_length
+            ccm_params.pNonce = <CK_BYTE *> nonce
+            ccm_params.ulNonceLen = <CK_ULONG> len(nonce)
+            if aad is not None and len(aad) > 0:
+                ccm_params.pAAD = <CK_BYTE *> aad
+                ccm_params.ulAADLen = <CK_ULONG> len(aad)
+            else:
+                ccm_params.pAAD = NULL
+                ccm_params.ulAADLen = 0
+
+        elif mechanism in (Mechanism.CHACHA20_POLY1305,
+                           Mechanism.SALSA20_POLY1305):
+            paramlen = sizeof(CK_SALSA20_CHACHA20_POLY1305_PARAMS)
+            self.param = chacha_poly_params = \
+                <CK_SALSA20_CHACHA20_POLY1305_PARAMS *> PyMem_Malloc(paramlen)
+            # Params: (nonce, aad) tuple
+            (nonce, aad) = param
+            chacha_poly_params.pNonce = <CK_BYTE *> nonce
+            chacha_poly_params.ulNonceLen = <CK_ULONG> len(nonce)
+            if aad is not None and len(aad) > 0:
+                chacha_poly_params.pAAD = <CK_BYTE *> aad
+                chacha_poly_params.ulAADLen = <CK_ULONG> len(aad)
+            else:
+                chacha_poly_params.pAAD = NULL
+                chacha_poly_params.ulAADLen = 0
 
         elif param is None:
             self.data.pParameter = NULL
