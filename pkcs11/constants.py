@@ -191,10 +191,70 @@ class Attribute(IntEnum):
     """Key supports KEM encapsulation (PKCS#11 v3.2, :class:`bool`)."""
     DECAPSULATE = 0x00000634
     """Key supports KEM decapsulation (PKCS#11 v3.2, :class:`bool`)."""
+    HSS_LEVELS = 0x00000617
+    """Number of LMS levels in an HSS hierarchy (PKCS#11 v3.2, :class:`int`)."""
+    HSS_LMS_TYPE = 0x00000618
+    """Top-level LMS tree encoding for HSS keys (PKCS#11 v3.2, :class:`int`)."""
+    HSS_LMOTS_TYPE = 0x00000619
+    """Top-level LM-OTS encoding for HSS keys (PKCS#11 v3.2, :class:`int`)."""
+    HSS_LMS_TYPES = 0x0000061A
+    """LMS tree encodings for each HSS level (PKCS#11 v3.2, :class:`list`)."""
+    HSS_LMOTS_TYPES = 0x0000061B
+    """LM-OTS encodings for each HSS level (PKCS#11 v3.2, :class:`list`)."""
+    HSS_KEYS_REMAINING = 0x0000061C
+    """Remaining signatures available on an HSS private key (PKCS#11 v3.2, :class:`int`)."""
     PARAMETER_SET = 0x0000061D
     """PQC algorithm parameter set (e.g. ML-KEM-512/768/1024, PKCS#11 v3.2, :class:`int`)."""
     PROFILE_ID = 0x00000601
     """Profile identifier on a CKO_PROFILE object (PKCS#11 v3.0, :class:`int`)."""
+    OBJECT_VALIDATION_FLAGS = 0x0000061E
+    """Validation flags applied to this object (PKCS#11 v3.2, :class:`int`)."""
+    VALIDATION_TYPE = 0x0000061F
+    """Validation type on a validation object (PKCS#11 v3.2, :class:`ValidationType`)."""
+    VALIDATION_VERSION = 0x00000620
+    """Validation version on a validation object (PKCS#11 v3.2, :class:`tuple`)."""
+    VALIDATION_LEVEL = 0x00000621
+    """Validation level on a validation object (PKCS#11 v3.2, :class:`int`)."""
+    VALIDATION_MODULE_ID = 0x00000622
+    """Validation module identifier (PKCS#11 v3.2, :class:`str`)."""
+    VALIDATION_FLAG = 0x00000623
+    """Validation flag value exposed by a validation object (PKCS#11 v3.2, :class:`int`)."""
+    VALIDATION_AUTHORITY_TYPE = 0x00000624
+    """Validation authority type (PKCS#11 v3.2, :class:`ValidationAuthorityType`)."""
+    VALIDATION_COUNTRY = 0x00000625
+    """Two-letter validation country code (PKCS#11 v3.2, :class:`str`)."""
+    VALIDATION_CERTIFICATE_IDENTIFIER = 0x00000626
+    """Validation certificate identifier (PKCS#11 v3.2, :class:`str`)."""
+    VALIDATION_CERTIFICATE_URI = 0x00000627
+    """Validation certificate URI (PKCS#11 v3.2, :class:`str`)."""
+    VALIDATION_VENDOR_URI = 0x00000628
+    """Validation vendor URI (PKCS#11 v3.2, :class:`str`)."""
+    VALIDATION_PROFILE = 0x00000629
+    """Validation profile string (PKCS#11 v3.2, :class:`str`)."""
+    ENCAPSULATE_TEMPLATE = 0x0000062A
+    """Template applied when encapsulating a key (PKCS#11 v3.2)."""
+    DECAPSULATE_TEMPLATE = 0x0000062B
+    """Template applied when decapsulating a key (PKCS#11 v3.2)."""
+    TRUST_SERVER_AUTH = 0x0000062C
+    """Trust value for server authentication (PKCS#11 v3.2, :class:`Trust`)."""
+    TRUST_CLIENT_AUTH = 0x0000062D
+    """Trust value for client authentication (PKCS#11 v3.2, :class:`Trust`)."""
+    TRUST_CODE_SIGNING = 0x0000062E
+    """Trust value for code signing (PKCS#11 v3.2, :class:`Trust`)."""
+    TRUST_EMAIL_PROTECTION = 0x0000062F
+    """Trust value for email protection (PKCS#11 v3.2, :class:`Trust`)."""
+    TRUST_IPSEC_IKE = 0x00000630
+    """Trust value for IPsec/IKE usage (PKCS#11 v3.2, :class:`Trust`)."""
+    TRUST_TIME_STAMPING = 0x00000631
+    """Trust value for time stamping (PKCS#11 v3.2, :class:`Trust`)."""
+    TRUST_OCSP_SIGNING = 0x00000632
+    """Trust value for OCSP signing (PKCS#11 v3.2, :class:`Trust`)."""
+    HASH_OF_CERTIFICATE = 0x00000635
+    """Digest of a certificate referenced by a trust object (PKCS#11 v3.2, :class:`bytes`)."""
+    PUBLIC_CRC64_VALUE = 0x00000636
+    """CRC64 linking a public key to its matching private key (PKCS#11 v3.2, :class:`bytes`)."""
+    SEED = 0x00000637
+    """Seed value for seed-bearing PQC private keys (PKCS#11 v3.2, :class:`bytes`)."""
     START_DATE = 0x00000110
     """Start date for the object's validity (:class:`datetime.date`)."""
     END_DATE = 0x00000111
@@ -388,6 +448,19 @@ class MechanismFlag(IntFlag):
     HW = 0x00000001
     """Mechanism is performed in hardware."""
 
+    MESSAGE_ENCRYPT = 0x00000002
+    """Can be used with message-based encryption APIs (PKCS#11 v3.0+)."""
+    MESSAGE_DECRYPT = 0x00000004
+    """Can be used with message-based decryption APIs (PKCS#11 v3.0+)."""
+    MESSAGE_SIGN = 0x00000008
+    """Can be used with message-based signing APIs (PKCS#11 v3.0+)."""
+    MESSAGE_VERIFY = 0x00000010
+    """Can be used with message-based verification APIs (PKCS#11 v3.0+)."""
+    MULTI_MESSAGE = 0x00000020
+    """Mechanism supports multi-message processing (PKCS#11 v3.0+)."""
+    FIND_OBJECTS = 0x00000040
+    """Can be used to cancel an active object search via C_SessionCancel."""
+
     ENCRYPT = 0x00000100
     """Can be used for encryption."""
     DECRYPT = 0x00000200
@@ -426,6 +499,25 @@ class MechanismFlag(IntFlag):
 
 
 @unique
+class MessageFlag(IntFlag):
+    """Flags for PKCS#11 message-based update calls."""
+
+    END_OF_MESSAGE = 0x00000001
+    """Marks the final part of a multi-part message operation."""
+
+
+@unique
+class GeneratorFunction(IntEnum):
+    """Generator selection for message/wrap parameter structures."""
+
+    NO_GENERATE = 0x00000000
+    GENERATE = 0x00000001
+    GENERATE_COUNTER = 0x00000002
+    GENERATE_RANDOM = 0x00000003
+    GENERATE_COUNTER_XOR = 0x00000004
+
+
+@unique
 class SlotFlag(IntFlag):
     """:class:`pkcs11.Slot` flags."""
 
@@ -452,6 +544,8 @@ class TokenFlag(IntFlag):
     """User must login."""
     USER_PIN_INITIALIZED = 0x00000008
     """Normal user's pin is set."""
+    ASYNC_SESSION_SUPPORTED = 0x04000000
+    """Token supports asynchronous sessions (PKCS#11 v3.2)."""
 
     RESTORE_KEY_NOT_NEEDED = 0x00000020
     """
@@ -559,7 +653,13 @@ class CancelStrategy(IntEnum):
     This usage is defined in PKCS#11 3.0 but not universally implemented.
     """
 
-    # TODO support cancelling with C_SessionCancel on PKCS#11 3.0 and up
+    CANCEL_WITH_SESSION_CANCEL = 2
+    """
+    Attempt to cancel by calling ``C_SessionCancel`` with the active operation flags.
+
+    This is the explicit PKCS#11 3.0+ cancellation path and is the preferred
+    strategy when the module implements it correctly.
+    """
 
 
 @unique
@@ -635,6 +735,8 @@ class ProfileID(IntEnum):
     via :meth:`pkcs11.Session.get_objects` with ``{Attribute.CLASS: ObjectClass.PROFILE}``.
     """
 
+    INVALID_ID = 0x00000000
+    """Invalid or unspecified profile identifier."""
     BASELINE_PROVIDER = 0x00000001
     """Baseline Provider profile — minimum conformance."""
     EXTENDED_PROVIDER = 0x00000002
@@ -643,5 +745,63 @@ class ProfileID(IntEnum):
     """Authentication Token profile."""
     PUBLIC_CERTIFICATES_TOKEN = 0x00000004
     """Public Certificates Token profile."""
+    COMPLETE_PROVIDER = 0x00000005
+    """Complete Provider profile."""
+    HKDF_TLS_TOKEN = 0x00000006
+    """HKDF-TLS Token profile."""
     VENDOR_DEFINED = 0x80000000
     """Vendor-defined profile base."""
+
+
+@unique
+class SessionValidationFlagsType(IntEnum):
+    """
+    Session validation flag selectors (PKCS#11 v3.2).
+
+    These values select which validation-state flags are returned by
+    ``C_GetSessionValidationFlags``.
+    """
+
+    LAST_VALIDATION_OK = 0x00000001
+    """Flags describing the most recent successful validation state."""
+
+
+@unique
+class ValidationType(IntEnum):
+    """
+    Validation types (PKCS#11 v3.2).
+
+    The published 3.2 header uses inconsistent macro names for these values.
+    This enum follows the attribute semantics from the specification.
+    """
+
+    UNSPECIFIED = 0x00000000
+    SOFTWARE = 0x00000001
+    HARDWARE = 0x00000002
+    FIRMWARE = 0x00000003
+    HYBRID = 0x00000004
+
+
+@unique
+class ValidationAuthorityType(IntEnum):
+    """
+    Validation authority types (PKCS#11 v3.2).
+
+    The published 3.2 header uses inconsistent macro names for these values.
+    This enum follows the attribute semantics from the specification.
+    """
+
+    UNSPECIFIED = 0x00000000
+    NIST_CMVP = 0x00000001
+    COMMON_CRITERIA = 0x00000002
+
+
+@unique
+class Trust(IntEnum):
+    """Trust values for ``CKA_TRUST_*`` attributes (PKCS#11 v3.2)."""
+
+    UNKNOWN = 0x00000000
+    TRUSTED = 0x00000001
+    ANCHOR = 0x00000002
+    NOT_TRUSTED = 0x00000003
+    MUST_VERIFY_TRUST = 0x00000004

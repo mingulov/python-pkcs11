@@ -13,9 +13,10 @@ from __future__ import (absolute_import, unicode_literals,
 
 from threading import RLock
 
+from cpython.bytearray cimport PyByteArray_AS_STRING, PyByteArray_GET_SIZE
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 from cpython.bytes cimport PyBytes_FromStringAndSize
-from libc.string cimport memcpy, strlen
+from libc.string cimport memcpy, memset, strlen
 
 from pkcs11 import types
 from pkcs11.attributes import AttributeMapper
@@ -51,6 +52,69 @@ cdef assertRV(rv) with gil:
     raise map_rv_to_error(rv)
 
 
+cdef bytes _coerce_pin_bytes(object pin):
+    if isinstance(pin, bytes):
+        return <bytes> pin
+    return pin.encode('utf-8')
+
+
+cdef bytes _coerce_utf8_bytes(object value):
+    if isinstance(value, bytes):
+        return <bytes> value
+    return value.encode('utf-8')
+
+
+cdef bytes _coerce_message_bytes(object value, object name):
+    if isinstance(value, bytes):
+        return <bytes> value
+    if isinstance(value, str):
+        return value.encode('utf-8')
+
+    try:
+        return bytes(value)
+    except TypeError as ex:
+        raise ArgumentsBad(f"`{name}` must be bytes-like or str.") from ex
+
+
+cdef bytes _coerce_operation_name(object value):
+    if isinstance(value, bytes):
+        return <bytes> value
+    if isinstance(value, str):
+        return value.encode('utf-8')
+    raise ArgumentsBad("`operation` must be str or bytes.")
+
+
+cdef inline CK_BYTE *_bytearray_ptr(bytearray value):
+    if PyByteArray_GET_SIZE(value) == 0:
+        return NULL
+    return <CK_BYTE *> PyByteArray_AS_STRING(value)
+
+
+cdef inline CK_ULONG _bytearray_len(bytearray value):
+    return <CK_ULONG> PyByteArray_GET_SIZE(value)
+
+
+cdef inline bint _attribute_is_template(CK_ATTRIBUTE_TYPE attr_type):
+    return (
+        attr_type == <CK_ATTRIBUTE_TYPE> Attribute.WRAP_TEMPLATE
+        or attr_type == <CK_ATTRIBUTE_TYPE> Attribute.UNWRAP_TEMPLATE
+        or attr_type == <CK_ATTRIBUTE_TYPE> Attribute.DERIVE_TEMPLATE
+        or attr_type == <CK_ATTRIBUTE_TYPE> Attribute.ENCAPSULATE_TEMPLATE
+        or attr_type == <CK_ATTRIBUTE_TYPE> Attribute.DECAPSULATE_TEMPLATE
+    )
+
+
+cdef inline void _zero_attribute_array(CK_ATTRIBUTE *data, CK_ULONG count):
+    if count > 0:
+        memset(data, 0, count * sizeof(CK_ATTRIBUTE))
+
+
+cdef inline CK_OBJECT_HANDLE _coerce_object_handle(object value):
+    if hasattr(value, "handle"):
+        return <CK_OBJECT_HANDLE> value.handle
+    return <CK_OBJECT_HANDLE> int(value)
+
+
 cdef class AttributeList:
     """
     A list of CK_ATTRIBUTE objects.
@@ -60,35 +124,61 @@ cdef class AttributeList:
     """CK_ATTRIBUTE * representation of the data."""
     cdef CK_ULONG count
     """Length of `data`."""
+    cdef list child_values
 
     def __cinit__(self, attrs):
         self.data = NULL
         self.count = 0
+        self.child_values = []
+
+    @staticmethod
+    cdef AttributeList allocate(CK_ULONG count):
+        cdef AttributeList lst = AttributeList.__new__(AttributeList, ())
+        lst.count = count
+        lst.child_values = [None] * count
+        if count == 0:
+            lst.data = NULL
+            return lst
+
+        lst.data = <CK_ATTRIBUTE *> PyMem_Malloc(count * sizeof(CK_ATTRIBUTE))
+        if lst.data is NULL:
+            raise MemoryError()
+        _zero_attribute_array(lst.data, count)
+        return lst
 
     @staticmethod
     cdef AttributeList from_owned_pointer(CK_ATTRIBUTE * data, CK_ULONG count):
         cdef AttributeList lst = AttributeList.__new__(AttributeList, ())
         lst.data = data
         lst.count = count
+        lst.child_values = [None] * count
         return lst
 
     @staticmethod
     cdef AttributeList from_template(dict template, object attribute_mapper):
-        cdef AttributeList lst = AttributeList.__new__(AttributeList, ())
-
-        lst.count = count = <CK_ULONG> len(template)
-
-        lst.data = <CK_ATTRIBUTE *> PyMem_Malloc(count * sizeof(CK_ATTRIBUTE))
-        if lst.data is NULL:
-            raise MemoryError()
-
+        cdef AttributeList lst = AttributeList.allocate(<CK_ULONG> len(template))
+        cdef CK_ULONG count = lst.count
         cdef bytes value_bytes
         cdef CK_CHAR * value_ptr
         cdef Py_ssize_t value_len
+        cdef object packed_value
+        cdef AttributeList child
         for index, (key, value) in enumerate(template.items()):
             lst.data[index].type = key
-            value_bytes = attribute_mapper.pack_attribute(key, value)
+            packed_value = attribute_mapper.pack_attribute(key, value)
+            if _attribute_is_template(<CK_ATTRIBUTE_TYPE> key):
+                child = AttributeList.from_template(dict(packed_value), attribute_mapper)
+                lst.child_values[index] = child
+                lst.data[index].pValue = <void *> child.data
+                lst.data[index].ulValueLen = child.count * sizeof(CK_ATTRIBUTE)
+                continue
+
+            value_bytes = packed_value
             value_len = len(value_bytes)
+            if value_len == 0:
+                lst.data[index].pValue = NULL
+                lst.data[index].ulValueLen = 0
+                continue
             # copy the result into a pointer that we manage, for consistency with the other init method
             value_ptr = <CK_CHAR *> PyMem_Malloc(value_len)
             if value_ptr is NULL:
@@ -104,8 +194,12 @@ cdef class AttributeList:
 
     cdef at_index(self, CK_ULONG index, object attribute_mapper):
         cdef CK_ATTRIBUTE * attr
+        cdef AttributeList child
         if index < self.count:
             attr = &self.data[index]
+            if self.child_values and self.child_values[index] is not None:
+                child = <AttributeList> self.child_values[index]
+                return attribute_mapper.unpack_attributes(attr.type, child.as_dict(attribute_mapper))
             return attribute_mapper.unpack_attributes(
                 attr.type,
                 PyBytes_FromStringAndSize(<char *> attr.pValue, <Py_ssize_t> attr.ulValueLen)
@@ -133,8 +227,62 @@ cdef class AttributeList:
         cdef CK_ULONG index = 0
         if self.data is not NULL:
             for index in range(self.count):
-                PyMem_Free(self.data[index].pValue)
+                if not self.child_values or self.child_values[index] is None:
+                    PyMem_Free(self.data[index].pValue)
             PyMem_Free(self.data)
+
+
+cdef bint _allocate_nested_attribute_buffers(AttributeList attrs) with gil:
+    cdef CK_ULONG index
+    cdef CK_ATTRIBUTE *attr
+    cdef AttributeList child
+    cdef CK_ULONG nested_count
+    cdef bint changed = False
+
+    for index in range(attrs.count):
+        attr = &attrs.data[index]
+        if attrs.child_values[index] is not None:
+            child = <AttributeList> attrs.child_values[index]
+            if _allocate_nested_attribute_buffers(child):
+                changed = True
+            continue
+
+        if _attribute_is_template(attr.type):
+            if attr.ulValueLen == CK_UNAVAILABLE_INFORMATION:
+                continue
+            nested_count = <CK_ULONG> (attr.ulValueLen / sizeof(CK_ATTRIBUTE))
+            child = AttributeList.allocate(nested_count)
+            attrs.child_values[index] = child
+            attr.pValue = <void *> child.data
+            attr.ulValueLen = nested_count * sizeof(CK_ATTRIBUTE)
+            changed = True
+            continue
+
+        if attr.pValue is NULL and attr.ulValueLen != 0 and attr.ulValueLen != CK_UNAVAILABLE_INFORMATION:
+            attr.pValue = PyMem_Malloc(attr.ulValueLen)
+            if attr.pValue is NULL:
+                raise MemoryError()
+            changed = True
+
+    return changed
+
+
+cdef void _ensure_attribute_values_ready(AttributeList attrs) with gil:
+    cdef CK_ULONG index
+    cdef CK_ATTRIBUTE *attr
+    cdef AttributeList child
+
+    for index in range(attrs.count):
+        attr = &attrs.data[index]
+        if attrs.child_values[index] is not None:
+            child = <AttributeList> attrs.child_values[index]
+            _ensure_attribute_values_ready(child)
+            continue
+
+        if attr.ulValueLen == CK_UNAVAILABLE_INFORMATION:
+            raise FunctionFailed()
+        if attr.ulValueLen != 0 and attr.pValue is NULL:
+            raise FunctionFailed()
 
 
 cdef class MechanismWithParam:
@@ -147,6 +295,7 @@ cdef class MechanismWithParam:
     cdef void *param
     """Reference to a pointer we might need to free."""
     cdef object _python_param
+    cdef list _extra_allocations
     """
     Hold a reference to the original parameter object so it doesn't get
     GC'd before this one.
@@ -156,6 +305,7 @@ cdef class MechanismWithParam:
         self.data = <CK_MECHANISM *> PyMem_Malloc(sizeof(CK_MECHANISM))
         self.param = NULL
         self._python_param = None
+        self._extra_allocations = []
 
     def __init__(self, key_type, mapping, mechanism=None, param=None):
         self._python_param = param
@@ -178,17 +328,35 @@ cdef class MechanismWithParam:
         cdef CK_KEY_DERIVATION_STRING_DATA *aes_ecb_params
         cdef CK_AES_CBC_ENCRYPT_DATA_PARAMS *aes_cbc_params
         cdef CK_GCM_PARAMS *gcm_params
+        cdef CK_GCM_MESSAGE_PARAMS *gcm_message_params
+        cdef CK_GCM_WRAP_PARAMS *gcm_wrap_params
         cdef CK_AES_CTR_PARAMS *aes_ctr_params
         cdef CK_CCM_PARAMS *ccm_params
+        cdef CK_CCM_MESSAGE_PARAMS *ccm_message_params
+        cdef CK_CCM_WRAP_PARAMS *ccm_wrap_params
         cdef CK_SALSA20_CHACHA20_POLY1305_PARAMS *chacha_poly_params
         cdef CK_HKDF_PARAMS *hkdf_params
         cdef CK_PKCS5_PBKD2_PARAMS2 *pbkd2_params
+        cdef CK_PRF_DATA_PARAM *sp800_data_params
+        cdef CK_SP800_108_COUNTER_FORMAT *sp800_counter_params
+        cdef CK_SP800_108_DKM_LENGTH_FORMAT *sp800_dkm_params
+        cdef CK_SP800_108_KDF_PARAMS *sp800_kdf_params
+        cdef CK_SP800_108_FEEDBACK_KDF_PARAMS *sp800_feedback_params
+        cdef CK_OBJECT_HANDLE *sp800_handle
         cdef CK_XEDDSA_PARAMS *xeddsa_params
         cdef CK_ECDH_AES_KEY_WRAP_PARAMS *ecdh_aes_params
         cdef CK_RSA_AES_KEY_WRAP_PARAMS *rsa_aes_params
         cdef CK_CHACHA20_PARAMS *chacha20_params
         cdef CK_SALSA20_PARAMS *salsa20_params
         cdef CK_DES_CBC_ENCRYPT_DATA_PARAMS *des_cbc_params
+        cdef object sp800_entry
+        cdef bytes data_bytes
+        cdef bytes iv_bytes
+        cdef Py_ssize_t sp800_index
+        cdef bytearray iv_buffer
+        cdef bytearray tag_buffer
+        cdef bytearray nonce_buffer
+        cdef bytearray mac_buffer
 
         # Unpack mechanism parameters
 
@@ -309,6 +477,34 @@ cdef class MechanismWithParam:
             des_cbc_params.pData = <CK_BYTE *> data
             des_cbc_params.length = <CK_ULONG> len(data)
 
+        elif mechanism == Mechanism.AES_GCM and isinstance(param, GCMMessageParams):
+            paramlen = sizeof(CK_GCM_MESSAGE_PARAMS)
+            self.param = gcm_message_params = <CK_GCM_MESSAGE_PARAMS *> PyMem_Malloc(paramlen)
+            iv_buffer = param.iv
+            tag_buffer = param.tag
+            gcm_message_params.pIv = _bytearray_ptr(iv_buffer)
+            gcm_message_params.ulIvLen = _bytearray_len(iv_buffer)
+            gcm_message_params.ulIvFixedBits = <CK_ULONG> param.iv_fixed_bits
+            gcm_message_params.ivGenerator = <CK_GENERATOR_FUNCTION> int(param.iv_generator)
+            gcm_message_params.pTag = _bytearray_ptr(tag_buffer)
+            gcm_message_params.ulTagBits = <CK_ULONG> param.tag_bits
+
+        elif mechanism == Mechanism.AES_GCM and isinstance(param, GCMWrapParams):
+            paramlen = sizeof(CK_GCM_WRAP_PARAMS)
+            self.param = gcm_wrap_params = <CK_GCM_WRAP_PARAMS *> PyMem_Malloc(paramlen)
+            iv_buffer = param.iv
+            gcm_wrap_params.pIv = _bytearray_ptr(iv_buffer)
+            gcm_wrap_params.ulIvLen = _bytearray_len(iv_buffer)
+            gcm_wrap_params.ulIvFixedBits = <CK_ULONG> param.iv_fixed_bits
+            gcm_wrap_params.ivGenerator = <CK_GENERATOR_FUNCTION> int(param.iv_generator)
+            if param.aad is not None:
+                gcm_wrap_params.pAAD = <CK_BYTE *> param.aad
+                gcm_wrap_params.ulAADLen = <CK_ULONG> len(param.aad)
+            else:
+                gcm_wrap_params.pAAD = NULL
+                gcm_wrap_params.ulAADLen = 0
+            gcm_wrap_params.ulTagBits = <CK_ULONG> param.tag_bits
+
         elif mechanism == Mechanism.AES_GCM:
             paramlen = sizeof(CK_GCM_PARAMS)
             if not isinstance(param, GCMParams):
@@ -333,6 +529,36 @@ cdef class MechanismWithParam:
                 raise TypeError
             aes_ctr_params.ulCounterBits = (16 - len(param.nonce)) * 8
             aes_ctr_params.cb = param.nonce + b"\x00" * (15 - len(param.nonce)) + b"\x01"
+
+        elif mechanism == Mechanism.AES_CCM and isinstance(param, CCMMessageParams):
+            paramlen = sizeof(CK_CCM_MESSAGE_PARAMS)
+            self.param = ccm_message_params = <CK_CCM_MESSAGE_PARAMS *> PyMem_Malloc(paramlen)
+            nonce_buffer = param.nonce
+            mac_buffer = param.mac
+            ccm_message_params.ulDataLen = <CK_ULONG> param.data_len
+            ccm_message_params.pNonce = _bytearray_ptr(nonce_buffer)
+            ccm_message_params.ulNonceLen = _bytearray_len(nonce_buffer)
+            ccm_message_params.ulNonceFixedBits = <CK_ULONG> param.nonce_fixed_bits
+            ccm_message_params.nonceGenerator = <CK_GENERATOR_FUNCTION> int(param.nonce_generator)
+            ccm_message_params.pMAC = _bytearray_ptr(mac_buffer)
+            ccm_message_params.ulMACLen = <CK_ULONG> param.mac_len
+
+        elif mechanism == Mechanism.AES_CCM and isinstance(param, CCMWrapParams):
+            paramlen = sizeof(CK_CCM_WRAP_PARAMS)
+            self.param = ccm_wrap_params = <CK_CCM_WRAP_PARAMS *> PyMem_Malloc(paramlen)
+            nonce_buffer = param.nonce
+            ccm_wrap_params.ulDataLen = <CK_ULONG> param.data_len
+            ccm_wrap_params.pNonce = _bytearray_ptr(nonce_buffer)
+            ccm_wrap_params.ulNonceLen = _bytearray_len(nonce_buffer)
+            ccm_wrap_params.ulNonceFixedBits = <CK_ULONG> param.nonce_fixed_bits
+            ccm_wrap_params.nonceGenerator = <CK_GENERATOR_FUNCTION> int(param.nonce_generator)
+            if param.aad is not None and len(param.aad) > 0:
+                ccm_wrap_params.pAAD = <CK_BYTE *> param.aad
+                ccm_wrap_params.ulAADLen = <CK_ULONG> len(param.aad)
+            else:
+                ccm_wrap_params.pAAD = NULL
+                ccm_wrap_params.ulAADLen = 0
+            ccm_wrap_params.ulMACLen = <CK_ULONG> param.mac_len
 
         elif mechanism == Mechanism.AES_CCM:
             paramlen = sizeof(CK_CCM_PARAMS)
@@ -435,6 +661,178 @@ cdef class MechanismWithParam:
             pbkd2_params.pPassword = <CK_UTF8CHAR *> password
             pbkd2_params.ulPasswordLen = <CK_ULONG> len(password)
 
+        elif mechanism in (Mechanism.SP800_108_COUNTER_KDF,
+                           Mechanism.SP800_108_DOUBLE_PIPELINE_KDF):
+            if not isinstance(param, SP800108KDFParams):
+                raise ArgumentsBad(
+                    "SP800-108 counter/double-pipeline KDF parameters must use SP800108KDFParams."
+                )
+            paramlen = sizeof(CK_SP800_108_KDF_PARAMS)
+            self.param = sp800_kdf_params = <CK_SP800_108_KDF_PARAMS *> PyMem_Malloc(paramlen)
+            sp800_kdf_params.prfType = <CK_SP800_108_PRF_TYPE> int(param.prf_type)
+            sp800_kdf_params.ulAdditionalDerivedKeys = 0
+            sp800_kdf_params.pAdditionalDerivedKeys = NULL
+            sp800_kdf_params.ulNumberOfDataParams = <CK_ULONG> len(param.data_params)
+            if sp800_kdf_params.ulNumberOfDataParams == 0:
+                sp800_kdf_params.pDataParams = NULL
+            else:
+                sp800_data_params = <CK_PRF_DATA_PARAM *> PyMem_Malloc(
+                    sp800_kdf_params.ulNumberOfDataParams * sizeof(CK_PRF_DATA_PARAM)
+                )
+                if sp800_data_params is NULL:
+                    raise MemoryError()
+                self._extra_allocations.append(<size_t> sp800_data_params)
+                memset(
+                    sp800_data_params,
+                    0,
+                    sp800_kdf_params.ulNumberOfDataParams * sizeof(CK_PRF_DATA_PARAM),
+                )
+                sp800_kdf_params.pDataParams = sp800_data_params
+                for sp800_index, sp800_entry in enumerate(param.data_params):
+                    sp800_data_params[sp800_index].type = <CK_PRF_DATA_TYPE> int(sp800_entry.data_type)
+                    if sp800_data_params[sp800_index].type in (
+                        CK_SP800_108_ITERATION_VARIABLE,
+                        CK_SP800_108_OPTIONAL_COUNTER,
+                        CK_SP800_108_COUNTER,
+                    ):
+                        if not isinstance(sp800_entry.value, SP800108CounterFormat):
+                            raise ArgumentsBad(
+                                "SP800-108 counter data parameters require SP800108CounterFormat."
+                            )
+                        sp800_counter_params = <CK_SP800_108_COUNTER_FORMAT *> PyMem_Malloc(
+                            sizeof(CK_SP800_108_COUNTER_FORMAT)
+                        )
+                        if sp800_counter_params is NULL:
+                            raise MemoryError()
+                        self._extra_allocations.append(<size_t> sp800_counter_params)
+                        sp800_counter_params.bLittleEndian = <CK_BBOOL> sp800_entry.value.little_endian
+                        sp800_counter_params.ulWidthInBits = <CK_ULONG> sp800_entry.value.width_in_bits
+                        sp800_data_params[sp800_index].pValue = sp800_counter_params
+                        sp800_data_params[sp800_index].ulValueLen = sizeof(CK_SP800_108_COUNTER_FORMAT)
+                    elif sp800_data_params[sp800_index].type == CK_SP800_108_DKM_LENGTH:
+                        if not isinstance(sp800_entry.value, SP800108DKMLengthFormat):
+                            raise ArgumentsBad(
+                                "SP800-108 DKM-length data parameters require SP800108DKMLengthFormat."
+                            )
+                        sp800_dkm_params = <CK_SP800_108_DKM_LENGTH_FORMAT *> PyMem_Malloc(
+                            sizeof(CK_SP800_108_DKM_LENGTH_FORMAT)
+                        )
+                        if sp800_dkm_params is NULL:
+                            raise MemoryError()
+                        self._extra_allocations.append(<size_t> sp800_dkm_params)
+                        sp800_dkm_params.dkmLengthMethod = <CK_SP800_108_DKM_LENGTH_METHOD> int(
+                            sp800_entry.value.method
+                        )
+                        sp800_dkm_params.bLittleEndian = <CK_BBOOL> sp800_entry.value.little_endian
+                        sp800_dkm_params.ulWidthInBits = <CK_ULONG> sp800_entry.value.width_in_bits
+                        sp800_data_params[sp800_index].pValue = sp800_dkm_params
+                        sp800_data_params[sp800_index].ulValueLen = sizeof(
+                            CK_SP800_108_DKM_LENGTH_FORMAT
+                        )
+                    elif sp800_data_params[sp800_index].type == CK_SP800_108_BYTE_ARRAY:
+                        data_bytes = _coerce_message_bytes(sp800_entry.value, "SP800-108 byte-array value")
+                        sp800_entry.value = data_bytes
+                        sp800_data_params[sp800_index].pValue = <CK_BYTE *> data_bytes
+                        sp800_data_params[sp800_index].ulValueLen = <CK_ULONG> len(data_bytes)
+                    elif sp800_data_params[sp800_index].type == CK_SP800_108_KEY_HANDLE:
+                        sp800_handle = <CK_OBJECT_HANDLE *> PyMem_Malloc(sizeof(CK_OBJECT_HANDLE))
+                        if sp800_handle is NULL:
+                            raise MemoryError()
+                        self._extra_allocations.append(<size_t> sp800_handle)
+                        sp800_handle[0] = _coerce_object_handle(sp800_entry.value)
+                        sp800_data_params[sp800_index].pValue = sp800_handle
+                        sp800_data_params[sp800_index].ulValueLen = sizeof(CK_OBJECT_HANDLE)
+                    else:
+                        raise ArgumentsBad("Unsupported SP800-108 data parameter type.")
+
+        elif mechanism == Mechanism.SP800_108_FEEDBACK_KDF:
+            if not isinstance(param, SP800108FeedbackKDFParams):
+                raise ArgumentsBad("SP800-108 feedback KDF parameters must use SP800108FeedbackKDFParams.")
+            paramlen = sizeof(CK_SP800_108_FEEDBACK_KDF_PARAMS)
+            self.param = sp800_feedback_params = <CK_SP800_108_FEEDBACK_KDF_PARAMS *> PyMem_Malloc(paramlen)
+            sp800_feedback_params.prfType = <CK_SP800_108_PRF_TYPE> int(param.prf_type)
+            sp800_feedback_params.ulAdditionalDerivedKeys = 0
+            sp800_feedback_params.pAdditionalDerivedKeys = NULL
+            iv_bytes = param.iv
+            if iv_bytes:
+                sp800_feedback_params.pIV = <CK_BYTE *> iv_bytes
+                sp800_feedback_params.ulIVLen = <CK_ULONG> len(iv_bytes)
+            else:
+                sp800_feedback_params.pIV = NULL
+                sp800_feedback_params.ulIVLen = 0
+            sp800_feedback_params.ulNumberOfDataParams = <CK_ULONG> len(param.data_params)
+            if sp800_feedback_params.ulNumberOfDataParams == 0:
+                sp800_feedback_params.pDataParams = NULL
+            else:
+                sp800_data_params = <CK_PRF_DATA_PARAM *> PyMem_Malloc(
+                    sp800_feedback_params.ulNumberOfDataParams * sizeof(CK_PRF_DATA_PARAM)
+                )
+                if sp800_data_params is NULL:
+                    raise MemoryError()
+                self._extra_allocations.append(<size_t> sp800_data_params)
+                memset(
+                    sp800_data_params,
+                    0,
+                    sp800_feedback_params.ulNumberOfDataParams * sizeof(CK_PRF_DATA_PARAM),
+                )
+                sp800_feedback_params.pDataParams = sp800_data_params
+                for sp800_index, sp800_entry in enumerate(param.data_params):
+                    sp800_data_params[sp800_index].type = <CK_PRF_DATA_TYPE> int(sp800_entry.data_type)
+                    if sp800_data_params[sp800_index].type in (
+                        CK_SP800_108_ITERATION_VARIABLE,
+                        CK_SP800_108_OPTIONAL_COUNTER,
+                        CK_SP800_108_COUNTER,
+                    ):
+                        if not isinstance(sp800_entry.value, SP800108CounterFormat):
+                            raise ArgumentsBad(
+                                "SP800-108 counter data parameters require SP800108CounterFormat."
+                            )
+                        sp800_counter_params = <CK_SP800_108_COUNTER_FORMAT *> PyMem_Malloc(
+                            sizeof(CK_SP800_108_COUNTER_FORMAT)
+                        )
+                        if sp800_counter_params is NULL:
+                            raise MemoryError()
+                        self._extra_allocations.append(<size_t> sp800_counter_params)
+                        sp800_counter_params.bLittleEndian = <CK_BBOOL> sp800_entry.value.little_endian
+                        sp800_counter_params.ulWidthInBits = <CK_ULONG> sp800_entry.value.width_in_bits
+                        sp800_data_params[sp800_index].pValue = sp800_counter_params
+                        sp800_data_params[sp800_index].ulValueLen = sizeof(CK_SP800_108_COUNTER_FORMAT)
+                    elif sp800_data_params[sp800_index].type == CK_SP800_108_DKM_LENGTH:
+                        if not isinstance(sp800_entry.value, SP800108DKMLengthFormat):
+                            raise ArgumentsBad(
+                                "SP800-108 DKM-length data parameters require SP800108DKMLengthFormat."
+                            )
+                        sp800_dkm_params = <CK_SP800_108_DKM_LENGTH_FORMAT *> PyMem_Malloc(
+                            sizeof(CK_SP800_108_DKM_LENGTH_FORMAT)
+                        )
+                        if sp800_dkm_params is NULL:
+                            raise MemoryError()
+                        self._extra_allocations.append(<size_t> sp800_dkm_params)
+                        sp800_dkm_params.dkmLengthMethod = <CK_SP800_108_DKM_LENGTH_METHOD> int(
+                            sp800_entry.value.method
+                        )
+                        sp800_dkm_params.bLittleEndian = <CK_BBOOL> sp800_entry.value.little_endian
+                        sp800_dkm_params.ulWidthInBits = <CK_ULONG> sp800_entry.value.width_in_bits
+                        sp800_data_params[sp800_index].pValue = sp800_dkm_params
+                        sp800_data_params[sp800_index].ulValueLen = sizeof(
+                            CK_SP800_108_DKM_LENGTH_FORMAT
+                        )
+                    elif sp800_data_params[sp800_index].type == CK_SP800_108_BYTE_ARRAY:
+                        data_bytes = _coerce_message_bytes(sp800_entry.value, "SP800-108 byte-array value")
+                        sp800_entry.value = data_bytes
+                        sp800_data_params[sp800_index].pValue = <CK_BYTE *> data_bytes
+                        sp800_data_params[sp800_index].ulValueLen = <CK_ULONG> len(data_bytes)
+                    elif sp800_data_params[sp800_index].type == CK_SP800_108_KEY_HANDLE:
+                        sp800_handle = <CK_OBJECT_HANDLE *> PyMem_Malloc(sizeof(CK_OBJECT_HANDLE))
+                        if sp800_handle is NULL:
+                            raise MemoryError()
+                        self._extra_allocations.append(<size_t> sp800_handle)
+                        sp800_handle[0] = _coerce_object_handle(sp800_entry.value)
+                        sp800_data_params[sp800_index].pValue = sp800_handle
+                        sp800_data_params[sp800_index].ulValueLen = sizeof(CK_OBJECT_HANDLE)
+                    else:
+                        raise ArgumentsBad("Unsupported SP800-108 data parameter type.")
+
         elif mechanism == Mechanism.ECDH_AES_KEY_WRAP:
             paramlen = sizeof(CK_ECDH_AES_KEY_WRAP_PARAMS)
             self.param = ecdh_aes_params = \
@@ -520,7 +918,84 @@ cdef class MechanismWithParam:
             self.data.pParameter = self.param
 
     def __dealloc__(self):
+        cdef object allocation
+        for allocation in self._extra_allocations:
+            PyMem_Free(<void *> <size_t> allocation)
         PyMem_Free(self.data)
+        PyMem_Free(self.param)
+
+
+cdef class MessageParameter:
+    cdef void *data
+    cdef CK_ULONG length
+    cdef void *param
+    cdef object _python_param
+
+    def __cinit__(self, *args):
+        self.data = NULL
+        self.length = 0
+        self.param = NULL
+        self._python_param = None
+
+    def __init__(self, parameter):
+        cdef bytes parameter_bytes
+        cdef CK_GCM_MESSAGE_PARAMS *gcm_message_params
+        cdef CK_CCM_MESSAGE_PARAMS *ccm_message_params
+        cdef bytearray iv_buffer
+        cdef bytearray tag_buffer
+        cdef bytearray nonce_buffer
+        cdef bytearray mac_buffer
+
+        if parameter is None:
+            return
+
+        if isinstance(parameter, bytes):
+            self._python_param = parameter
+            self.data = <void *> parameter
+            self.length = <CK_ULONG> len(parameter)
+            return
+
+        if isinstance(parameter, str):
+            parameter_bytes = parameter.encode("utf-8")
+            self._python_param = parameter_bytes
+            self.data = <void *> parameter_bytes
+            self.length = <CK_ULONG> len(parameter_bytes)
+            return
+
+        self._python_param = parameter
+
+        if isinstance(parameter, GCMMessageParams):
+            self.length = sizeof(CK_GCM_MESSAGE_PARAMS)
+            self.param = gcm_message_params = <CK_GCM_MESSAGE_PARAMS *> PyMem_Malloc(self.length)
+            iv_buffer = parameter.iv
+            tag_buffer = parameter.tag
+            gcm_message_params.pIv = _bytearray_ptr(iv_buffer)
+            gcm_message_params.ulIvLen = _bytearray_len(iv_buffer)
+            gcm_message_params.ulIvFixedBits = <CK_ULONG> parameter.iv_fixed_bits
+            gcm_message_params.ivGenerator = <CK_GENERATOR_FUNCTION> int(parameter.iv_generator)
+            gcm_message_params.pTag = _bytearray_ptr(tag_buffer)
+            gcm_message_params.ulTagBits = <CK_ULONG> parameter.tag_bits
+            self.data = self.param
+            return
+
+        if isinstance(parameter, CCMMessageParams):
+            self.length = sizeof(CK_CCM_MESSAGE_PARAMS)
+            self.param = ccm_message_params = <CK_CCM_MESSAGE_PARAMS *> PyMem_Malloc(self.length)
+            nonce_buffer = parameter.nonce
+            mac_buffer = parameter.mac
+            ccm_message_params.ulDataLen = <CK_ULONG> parameter.data_len
+            ccm_message_params.pNonce = _bytearray_ptr(nonce_buffer)
+            ccm_message_params.ulNonceLen = _bytearray_len(nonce_buffer)
+            ccm_message_params.ulNonceFixedBits = <CK_ULONG> parameter.nonce_fixed_bits
+            ccm_message_params.nonceGenerator = <CK_GENERATOR_FUNCTION> int(parameter.nonce_generator)
+            ccm_message_params.pMAC = _bytearray_ptr(mac_buffer)
+            ccm_message_params.ulMACLen = <CK_ULONG> parameter.mac_len
+            self.data = self.param
+            return
+
+        raise ArgumentsBad("`parameter` must be bytes-like, str, or a supported message parameter helper.")
+
+    def __dealloc__(self):
         PyMem_Free(self.param)
 
 
@@ -621,6 +1096,31 @@ cdef class Slot(HasFuncList, types.Slot):
 
         return types.MechanismInfo(self, mechanism, **info)
 
+    def init_token(self, label, so_pin):
+        cdef CK_UTF8CHAR *pin_data
+        cdef CK_ULONG pin_length
+        cdef CK_UTF8CHAR *label_data
+        cdef bytes pin = _coerce_pin_bytes(so_pin)
+        cdef bytes label_bytes
+        cdef CK_RV retval
+
+        if isinstance(label, bytes):
+            label_bytes = <bytes> label
+        else:
+            label_bytes = label.encode('utf-8')
+
+        if len(label_bytes) > 32:
+            raise ArgumentsBad("`label` must be 32 bytes or fewer")
+
+        label_bytes = label_bytes.ljust(32, b' ')
+        pin_data = pin
+        pin_length = <CK_ULONG> len(pin)
+        label_data = label_bytes
+
+        with nogil:
+            retval = self.funclist.C_InitToken(self.slot_id, pin_data, pin_length, label_data)
+        assertRV(retval)
+
     def _identity(self):
         return Slot.__name__, self.slot_id
 
@@ -697,6 +1197,8 @@ cdef class Token(HasFuncList, types.Token):
             rw=False,
             user_pin=None,
             so_pin=None,
+            async_=False,
+            username=None,
             user_type=None,
             attribute_mapper=None,
             cancel_strategy=CancelStrategy.DEFAULT
@@ -704,14 +1206,16 @@ cdef class Token(HasFuncList, types.Token):
         cdef CK_SLOT_ID slot_id = self.slot.slot_id
         cdef CK_SESSION_HANDLE handle
         cdef CK_FLAGS flags = CKF_SERIAL_SESSION
-        cdef CK_USER_TYPE final_user_type
-        cdef CK_UTF8CHAR *pin_data
-        cdef CK_ULONG pin_length
         cdef CK_RV retval
         cdef CK_USER_TYPE c_user_type
+        cdef Session session
 
         if rw:
             flags |= CKF_RW_SESSION
+        if async_:
+            if self.funclist32 == NULL:
+                raise NotImplementedError("async_=True requires PKCS#11 v3.2 interface")
+            flags |= CKF_ASYNC_SESSION
 
         if user_pin is not None and so_pin is not None:
             raise ArgumentsBad("Set either `user_pin` or `so_pin`")
@@ -719,13 +1223,13 @@ cdef class Token(HasFuncList, types.Token):
             pin = None
             c_user_type = user_type if user_type is not None else CKU_USER
         elif so_pin is PROTECTED_AUTH:
-            pin = None
+            pin = PROTECTED_AUTH
             c_user_type = CKU_SO
         elif user_pin is not None:
-            pin = user_pin.encode('utf-8')
+            pin = user_pin
             c_user_type = user_type if user_type is not None else CKU_USER
         elif so_pin is not None:
-            pin = so_pin.encode('utf-8')
+            pin = so_pin
             c_user_type = CKU_SO
         else:
             pin = None
@@ -735,28 +1239,23 @@ cdef class Token(HasFuncList, types.Token):
             retval = self.funclist.C_OpenSession(slot_id, flags, NULL, NULL, &handle)
         assertRV(retval)
 
-        if so_pin is PROTECTED_AUTH or user_pin is PROTECTED_AUTH:
-            if self.flags & TokenFlag.PROTECTED_AUTHENTICATION_PATH:
-                with nogil:
-                    retval = self.funclist.C_Login(handle, c_user_type, NULL, 0)
-                assertRV(retval)
-            else:
-                raise ArgumentsBad("Protected authentication is not supported by loaded module")
-        elif pin is not None:
-            pin_data = pin
-            pin_length = <CK_ULONG> len(pin)
-
-            with nogil:
-                retval = self.funclist.C_Login(handle, c_user_type, pin_data, pin_length)
-            assertRV(retval)
-
-        return Session.make(
+        session = Session.make(
             self, handle,
             rw=<bint> rw,
-            user_type=c_user_type,
+            async_=<bint> async_,
+            user_type=CKU_USER_NOBODY,
             mapper=attribute_mapper or AttributeMapper(),
             cancel_strategy=<unsigned int> cancel_strategy
         )
+
+        if c_user_type != CKU_USER_NOBODY or username is not None:
+            try:
+                session.login(c_user_type, pin=pin, username=username)
+            except Exception:
+                session.close()
+                raise
+
+        return session
 
     def __str__(self):
         return self.label
@@ -1066,6 +1565,7 @@ cdef class Session(HasFuncList, types.Session):
     cdef readonly CK_SESSION_HANDLE handle
     cdef readonly Token token
     cdef readonly bint rw
+    cdef readonly bint async_
     cdef CK_USER_TYPE _user_type
     cdef object operation_lock
     cdef object attribute_mapper
@@ -1076,6 +1576,7 @@ cdef class Session(HasFuncList, types.Session):
             Token token,
             CK_SESSION_HANDLE handle,
             bint rw,
+            bint async_,
             CK_USER_TYPE user_type,
             object mapper,
             unsigned int cancel_strategy
@@ -1094,6 +1595,7 @@ cdef class Session(HasFuncList, types.Session):
         session.operation_lock = RLock()
 
         session.rw = rw
+        session.async_ = async_
         session._user_type = user_type
         session.attribute_mapper = mapper
         session.cancel_strategy = cancel_strategy
@@ -1115,13 +1617,74 @@ cdef class Session(HasFuncList, types.Session):
         cdef CK_RV retval
 
         if self.user_type != UserType.NOBODY:
-            with nogil:
-                retval = self.funclist.C_Logout(handle)
-            assertRV(retval)
+            self.logout()
 
         with nogil:
             retval = self.funclist.C_CloseSession(handle)
         assertRV(retval)
+
+    def login(self, user_type=UserType.USER, pin=None, username=None):
+        cdef CK_UTF8CHAR *pin_data = NULL
+        cdef CK_ULONG pin_length = 0
+        cdef CK_UTF8CHAR *username_data = NULL
+        cdef CK_ULONG username_length = 0
+        cdef CK_RV retval
+        cdef CK_USER_TYPE c_user_type = user_type
+        cdef bytes pin_bytes
+        cdef bytes username_bytes
+
+        if pin is PROTECTED_AUTH:
+            if not self.token.flags & TokenFlag.PROTECTED_AUTHENTICATION_PATH:
+                raise ArgumentsBad("Protected authentication is not supported by loaded module")
+        elif pin is not None:
+            pin_bytes = _coerce_pin_bytes(pin)
+            pin_data = pin_bytes
+            pin_length = <CK_ULONG> len(pin_bytes)
+
+        if username is not None:
+            username_bytes = _coerce_utf8_bytes(username)
+            username_data = username_bytes
+            username_length = <CK_ULONG> len(username_bytes)
+
+            if self.funclist32 != NULL:
+                with nogil:
+                    retval = self.funclist32.C_LoginUser(
+                        self.handle,
+                        c_user_type,
+                        pin_data,
+                        pin_length,
+                        username_data,
+                        username_length,
+                    )
+            elif self.funclist3 != NULL:
+                with nogil:
+                    retval = self.funclist3.C_LoginUser(
+                        self.handle,
+                        c_user_type,
+                        pin_data,
+                        pin_length,
+                        username_data,
+                        username_length,
+                    )
+            else:
+                raise NotImplementedError("login(username=...) requires PKCS#11 v3.0 interface")
+        else:
+            with nogil:
+                retval = self.funclist.C_Login(self.handle, c_user_type, pin_data, pin_length)
+
+        assertRV(retval)
+        self._user_type = c_user_type
+
+    def logout(self):
+        cdef CK_RV retval
+
+        if self.user_type == UserType.NOBODY:
+            return
+
+        with nogil:
+            retval = self.funclist.C_Logout(self.handle)
+        assertRV(retval)
+        self._user_type = CKU_USER_NOBODY
 
     def get_objects(self, attrs=None, batch_size=10):
         with SearchIter(self, attrs or {}, batch_size) as op:
@@ -1129,16 +1692,837 @@ cdef class Session(HasFuncList, types.Session):
                 yield from batch
 
     def reaffirm_credentials(self, pin):
-        cdef CK_UTF8CHAR *pin_data
-        cdef CK_ULONG pin_length
+        self.login(UserType.CONTEXT_SPECIFIC, pin=pin)
 
-        pin = pin.encode('utf-8')
-        pin_data = pin
-        pin_length = <CK_ULONG> len(pin)
-        user_type = CKU_CONTEXT_SPECIFIC
+    def cancel(self, flags=0):
+        cdef CK_FLAGS c_flags = flags
+        cdef CK_RV retval
+
+        if self.funclist32 != NULL:
+            with nogil:
+                retval = self.funclist32.C_SessionCancel(self.handle, c_flags)
+        elif self.funclist3 != NULL:
+            with nogil:
+                retval = self.funclist3.C_SessionCancel(self.handle, c_flags)
+        else:
+            raise NotImplementedError("cancel requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def get_validation_flags(self, type=SessionValidationFlagsType.LAST_VALIDATION_OK):
+        cdef CK_SESSION_VALIDATION_FLAGS_TYPE c_type = type
+        cdef CK_FLAGS flags
+        cdef CK_RV retval
+
+        if self.funclist32 == NULL:
+            raise NotImplementedError("get_validation_flags requires PKCS#11 v3.2 interface")
 
         with nogil:
-            retval = self.funclist.C_Login(self.handle, user_type, pin_data, pin_length)
+            retval = self.funclist32.C_GetSessionValidationFlags(self.handle, c_type, &flags)
+        assertRV(retval)
+        return flags
+
+    def async_complete(self, operation, capture_result=True):
+        cdef Session session = self
+        cdef bytes operation_name
+        cdef CK_UTF8CHAR *operation_ptr
+        cdef CK_ASYNC_DATA result
+        cdef CK_RV retval
+        cdef object object_result = None
+        cdef object additional_object_result = None
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("async_complete requires PKCS#11 v3.2 interface")
+
+        operation_name = _coerce_operation_name(operation)
+        operation_ptr = operation_name
+
+        if not capture_result:
+            with nogil:
+                retval = session.funclist32.C_AsyncComplete(session.handle, operation_ptr, NULL)
+            assertRV(retval)
+            return None
+
+        result.ulVersion = 0
+        result.pValue = NULL
+        result.ulValue = 0
+        result.hObject = 0
+        result.hAdditionalObject = 0
+
+        with nogil:
+            retval = session.funclist32.C_AsyncComplete(session.handle, operation_ptr, &result)
+        assertRV(retval)
+
+        if result.hObject != 0:
+            object_result = make_object(session, result.hObject)
+        if result.hAdditionalObject != 0:
+            additional_object_result = make_object(session, result.hAdditionalObject)
+
+        return types.AsyncResult(
+            value=(
+                PyBytes_FromStringAndSize(<char *> result.pValue, <Py_ssize_t> result.ulValue)
+                if result.pValue != NULL else None
+            ),
+            object=object_result,
+            additional_object=additional_object_result,
+        )
+
+    def async_get_id(self, operation):
+        cdef Session session = self
+        cdef bytes operation_name
+        cdef CK_UTF8CHAR *operation_ptr
+        cdef CK_ULONG operation_id
+        cdef CK_RV retval
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("async_get_id requires PKCS#11 v3.2 interface")
+
+        operation_name = _coerce_operation_name(operation)
+        operation_ptr = operation_name
+
+        with nogil:
+            retval = session.funclist32.C_AsyncGetID(session.handle, operation_ptr, &operation_id)
+        assertRV(retval)
+        return operation_id
+
+    def async_join(self, operation, operation_id, data=None):
+        cdef Session session = self
+        cdef bytes operation_name
+        cdef CK_UTF8CHAR *operation_ptr
+        cdef CK_ULONG c_operation_id = <CK_ULONG> operation_id
+        cdef CK_BYTE *data_ptr = NULL
+        cdef CK_ULONG data_len = 0
+        cdef CK_RV retval
+        cdef bytearray data_buffer
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("async_join requires PKCS#11 v3.2 interface")
+
+        operation_name = _coerce_operation_name(operation)
+        operation_ptr = operation_name
+
+        if data is not None:
+            if not isinstance(data, bytearray):
+                raise ArgumentsBad("`data` must be a bytearray when supplied.")
+            data_buffer = data
+            data_ptr = _bytearray_ptr(data_buffer)
+            data_len = _bytearray_len(data_buffer)
+
+        with nogil:
+            retval = session.funclist32.C_AsyncJoin(
+                session.handle,
+                operation_ptr,
+                c_operation_id,
+                data_ptr,
+                data_len,
+            )
+        assertRV(retval)
+
+    def message_encrypt_init(self, key, mechanism=None, mechanism_param=None):
+        cdef CK_RV retval
+        cdef Session session = self
+        cdef CK_MECHANISM *mech_data
+        cdef CK_OBJECT_HANDLE key_handle
+
+        if not isinstance(key, types.Key):
+            raise ArgumentsBad("`key` must be a Key.")
+
+        mech = MechanismWithParam(key.key_type, DEFAULT_ENCRYPT_MECHANISMS, mechanism, mechanism_param)
+        mech_data = mech.data
+        key_handle = key.handle
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageEncryptInit(session.handle, mech_data, key_handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageEncryptInit(session.handle, mech_data, key_handle)
+        else:
+            raise NotImplementedError("message_encrypt_init requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def encrypt_message(self, data, parameter=None, associated_data=None):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef bytes aad_bytes
+        cdef CK_BYTE *aad_ptr = NULL
+        cdef CK_ULONG aad_len = 0
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_ULONG output_len
+        cdef CK_RV retval
+
+        if associated_data is not None:
+            aad_bytes = _coerce_message_bytes(associated_data, "associated_data")
+            aad_ptr = aad_bytes
+            aad_len = <CK_ULONG> len(aad_bytes)
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_EncryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_EncryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        else:
+            raise NotImplementedError("encrypt_message requires PKCS#11 v3.0 interface")
+        assertRV(retval)
+
+        cdef CK_BYTE [:] output_buf = CK_BYTE_buffer(output_len or 1)
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_EncryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        else:
+            with nogil:
+                retval = session.funclist3.C_EncryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        assertRV(retval)
+        return bytes(output_buf[:output_len])
+
+    def encrypt_message_begin(self, parameter=None, associated_data=None):
+        cdef Session session = self
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef bytes aad_bytes
+        cdef CK_BYTE *aad_ptr = NULL
+        cdef CK_ULONG aad_len = 0
+        cdef CK_RV retval
+
+        if associated_data is not None:
+            aad_bytes = _coerce_message_bytes(associated_data, "associated_data")
+            aad_ptr = aad_bytes
+            aad_len = <CK_ULONG> len(aad_bytes)
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_EncryptMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length, aad_ptr, aad_len
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_EncryptMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length, aad_ptr, aad_len
+                )
+        else:
+            raise NotImplementedError("encrypt_message_begin requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def encrypt_message_next(self, data, parameter=None, flags=0):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_ULONG output_len
+        cdef CK_FLAGS c_flags = flags
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_EncryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                    c_flags,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_EncryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                    c_flags,
+                )
+        else:
+            raise NotImplementedError("encrypt_message_next requires PKCS#11 v3.0 interface")
+        assertRV(retval)
+
+        cdef CK_BYTE [:] output_buf = CK_BYTE_buffer(output_len or 1)
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_EncryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                    c_flags,
+                )
+        else:
+            with nogil:
+                retval = session.funclist3.C_EncryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                    c_flags,
+                )
+        assertRV(retval)
+        return bytes(output_buf[:output_len])
+
+    def message_encrypt_final(self):
+        cdef Session session = self
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageEncryptFinal(session.handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageEncryptFinal(session.handle)
+        else:
+            raise NotImplementedError("message_encrypt_final requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def message_decrypt_init(self, key, mechanism=None, mechanism_param=None):
+        cdef CK_RV retval
+        cdef Session session = self
+        cdef CK_MECHANISM *mech_data
+        cdef CK_OBJECT_HANDLE key_handle
+
+        if not isinstance(key, types.Key):
+            raise ArgumentsBad("`key` must be a Key.")
+
+        mech = MechanismWithParam(key.key_type, DEFAULT_ENCRYPT_MECHANISMS, mechanism, mechanism_param)
+        mech_data = mech.data
+        key_handle = key.handle
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageDecryptInit(session.handle, mech_data, key_handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageDecryptInit(session.handle, mech_data, key_handle)
+        else:
+            raise NotImplementedError("message_decrypt_init requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def decrypt_message(self, data, parameter=None, associated_data=None):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef bytes aad_bytes
+        cdef CK_BYTE *aad_ptr = NULL
+        cdef CK_ULONG aad_len = 0
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_ULONG output_len
+        cdef CK_RV retval
+
+        if associated_data is not None:
+            aad_bytes = _coerce_message_bytes(associated_data, "associated_data")
+            aad_ptr = aad_bytes
+            aad_len = <CK_ULONG> len(aad_bytes)
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_DecryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_DecryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        else:
+            raise NotImplementedError("decrypt_message requires PKCS#11 v3.0 interface")
+        assertRV(retval)
+
+        cdef CK_BYTE [:] output_buf = CK_BYTE_buffer(output_len or 1)
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_DecryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        else:
+            with nogil:
+                retval = session.funclist3.C_DecryptMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    aad_ptr, aad_len,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        assertRV(retval)
+        return bytes(output_buf[:output_len])
+
+    def decrypt_message_begin(self, parameter=None, associated_data=None):
+        cdef Session session = self
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef bytes aad_bytes
+        cdef CK_BYTE *aad_ptr = NULL
+        cdef CK_ULONG aad_len = 0
+        cdef CK_RV retval
+
+        if associated_data is not None:
+            aad_bytes = _coerce_message_bytes(associated_data, "associated_data")
+            aad_ptr = aad_bytes
+            aad_len = <CK_ULONG> len(aad_bytes)
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_DecryptMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length, aad_ptr, aad_len
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_DecryptMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length, aad_ptr, aad_len
+                )
+        else:
+            raise NotImplementedError("decrypt_message_begin requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def decrypt_message_next(self, data, parameter=None, flags=0):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_ULONG output_len
+        cdef CK_FLAGS c_flags = flags
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_DecryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                    c_flags,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_DecryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                    c_flags,
+                )
+        else:
+            raise NotImplementedError("decrypt_message_next requires PKCS#11 v3.0 interface")
+        assertRV(retval)
+
+        cdef CK_BYTE [:] output_buf = CK_BYTE_buffer(output_len or 1)
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_DecryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                    c_flags,
+                )
+        else:
+            with nogil:
+                retval = session.funclist3.C_DecryptMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                    c_flags,
+                )
+        assertRV(retval)
+        return bytes(output_buf[:output_len])
+
+    def message_decrypt_final(self):
+        cdef Session session = self
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageDecryptFinal(session.handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageDecryptFinal(session.handle)
+        else:
+            raise NotImplementedError("message_decrypt_final requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def message_sign_init(self, key, mechanism=None, mechanism_param=None):
+        cdef CK_RV retval
+        cdef Session session = self
+        cdef CK_MECHANISM *mech_data
+        cdef CK_OBJECT_HANDLE key_handle
+
+        if not isinstance(key, types.Key):
+            raise ArgumentsBad("`key` must be a Key.")
+
+        mech = MechanismWithParam(key.key_type, DEFAULT_SIGN_MECHANISMS, mechanism, mechanism_param)
+        mech_data = mech.data
+        key_handle = key.handle
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageSignInit(session.handle, mech_data, key_handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageSignInit(session.handle, mech_data, key_handle)
+        else:
+            raise NotImplementedError("message_sign_init requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def sign_message(self, data, parameter=None):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_ULONG output_len
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_SignMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_SignMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        else:
+            raise NotImplementedError("sign_message requires PKCS#11 v3.0 interface")
+        assertRV(retval)
+
+        cdef CK_BYTE [:] output_buf = CK_BYTE_buffer(output_len or 1)
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_SignMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        else:
+            with nogil:
+                retval = session.funclist3.C_SignMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        assertRV(retval)
+        return bytes(output_buf[:output_len])
+
+    def sign_message_begin(self, parameter=None):
+        cdef Session session = self
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_SignMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_SignMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length
+                )
+        else:
+            raise NotImplementedError("sign_message_begin requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def sign_message_next(self, data, parameter=None):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_ULONG output_len
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_SignMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_SignMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    NULL, &output_len,
+                )
+        else:
+            raise NotImplementedError("sign_message_next requires PKCS#11 v3.0 interface")
+        assertRV(retval)
+
+        cdef CK_BYTE [:] output_buf = CK_BYTE_buffer(output_len or 1)
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_SignMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        else:
+            with nogil:
+                retval = session.funclist3.C_SignMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    &output_buf[0], &output_len,
+                )
+        assertRV(retval)
+        return bytes(output_buf[:output_len])
+
+    def message_sign_final(self):
+        cdef Session session = self
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageSignFinal(session.handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageSignFinal(session.handle)
+        else:
+            raise NotImplementedError("message_sign_final requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def message_verify_init(self, key, mechanism=None, mechanism_param=None):
+        cdef CK_RV retval
+        cdef Session session = self
+        cdef CK_MECHANISM *mech_data
+        cdef CK_OBJECT_HANDLE key_handle
+
+        if not isinstance(key, types.Key):
+            raise ArgumentsBad("`key` must be a Key.")
+
+        mech = MechanismWithParam(key.key_type, DEFAULT_SIGN_MECHANISMS, mechanism, mechanism_param)
+        mech_data = mech.data
+        key_handle = key.handle
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageVerifyInit(session.handle, mech_data, key_handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageVerifyInit(session.handle, mech_data, key_handle)
+        else:
+            raise NotImplementedError("message_verify_init requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def verify_message(self, data, signature, parameter=None):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef bytes signature_bytes = _coerce_message_bytes(signature, "signature")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_BYTE *sig_ptr = signature_bytes
+        cdef CK_ULONG sig_len = <CK_ULONG> len(signature_bytes)
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_VerifyMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    sig_ptr, sig_len,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_VerifyMessage(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    sig_ptr, sig_len,
+                )
+        else:
+            raise NotImplementedError("verify_message requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def verify_message_begin(self, parameter=None):
+        cdef Session session = self
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_VerifyMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_VerifyMessageBegin(
+                    session.handle, parameter_data.data, parameter_data.length
+                )
+        else:
+            raise NotImplementedError("verify_message_begin requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def verify_message_next(self, data, signature, parameter=None):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef bytes signature_bytes = _coerce_message_bytes(signature, "signature")
+        cdef MessageParameter parameter_data = MessageParameter(parameter)
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_BYTE *sig_ptr = signature_bytes
+        cdef CK_ULONG sig_len = <CK_ULONG> len(signature_bytes)
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_VerifyMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    sig_ptr, sig_len,
+                )
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_VerifyMessageNext(
+                    session.handle,
+                    parameter_data.data, parameter_data.length,
+                    data_ptr, data_len,
+                    sig_ptr, sig_len,
+                )
+        else:
+            raise NotImplementedError("verify_message_next requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def message_verify_final(self):
+        cdef Session session = self
+        cdef CK_RV retval
+
+        if session.funclist32 != NULL:
+            with nogil:
+                retval = session.funclist32.C_MessageVerifyFinal(session.handle)
+        elif session.funclist3 != NULL:
+            with nogil:
+                retval = session.funclist3.C_MessageVerifyFinal(session.handle)
+        else:
+            raise NotImplementedError("message_verify_final requires PKCS#11 v3.0 interface")
+
+        assertRV(retval)
+
+    def verify_signature_init(self, key, signature, mechanism=None, mechanism_param=None):
+        cdef Session session = self
+        cdef bytes signature_bytes = _coerce_message_bytes(signature, "signature")
+        cdef CK_BYTE *signature_ptr = signature_bytes
+        cdef CK_ULONG signature_len = <CK_ULONG> len(signature_bytes)
+        cdef CK_RV retval
+        cdef CK_MECHANISM *mech_data
+        cdef CK_OBJECT_HANDLE key_handle
+
+        if not isinstance(key, types.Key):
+            raise ArgumentsBad("`key` must be a Key.")
+        if session.funclist32 == NULL:
+            raise NotImplementedError("verify_signature_init requires PKCS#11 v3.2 interface")
+
+        mech = MechanismWithParam(key.key_type, DEFAULT_SIGN_MECHANISMS, mechanism, mechanism_param)
+        mech_data = mech.data
+        key_handle = key.handle
+
+        with nogil:
+            retval = session.funclist32.C_VerifySignatureInit(
+                session.handle, mech_data, key_handle, signature_ptr, signature_len
+            )
+        assertRV(retval)
+
+    def verify_signature(self, data):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_RV retval
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("verify_signature requires PKCS#11 v3.2 interface")
+
+        with nogil:
+            retval = session.funclist32.C_VerifySignature(session.handle, data_ptr, data_len)
+        assertRV(retval)
+
+    def verify_signature_update(self, data):
+        cdef Session session = self
+        cdef bytes data_bytes = _coerce_message_bytes(data, "data")
+        cdef CK_BYTE *data_ptr = data_bytes
+        cdef CK_ULONG data_len = <CK_ULONG> len(data_bytes)
+        cdef CK_RV retval
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("verify_signature_update requires PKCS#11 v3.2 interface")
+
+        with nogil:
+            retval = session.funclist32.C_VerifySignatureUpdate(session.handle, data_ptr, data_len)
+        assertRV(retval)
+
+    def verify_signature_final(self):
+        cdef Session session = self
+        cdef CK_RV retval
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("verify_signature_final requires PKCS#11 v3.2 interface")
+
+        with nogil:
+            retval = session.funclist32.C_VerifySignatureFinal(session.handle)
         assertRV(retval)
 
     def create_object(self, attrs):
@@ -1372,13 +2756,13 @@ cdef class Session(HasFuncList, types.Session):
         cdef CK_UTF8CHAR *new_pin_data
         cdef CK_RV retval
 
-        pin_old = old_pin.encode('utf-8')
-        pin_new = new_pin.encode('utf-8')
+        pin_old = _coerce_pin_bytes(old_pin)
+        pin_new = _coerce_pin_bytes(new_pin)
 
         old_pin_data = pin_old
         new_pin_data = pin_new
-        old_pin_length = len(pin_old)
-        new_pin_length = len(pin_new)
+        old_pin_length = <CK_ULONG> len(pin_old)
+        new_pin_length = <CK_ULONG> len(pin_new)
 
         with nogil:
             retval = self.funclist.C_SetPIN(handle, old_pin_data, old_pin_length, new_pin_data, new_pin_length)
@@ -1390,10 +2774,10 @@ cdef class Session(HasFuncList, types.Session):
         cdef CK_ULONG pin_length
         cdef CK_RV retval
 
-        pin = pin.encode('utf-8')
+        pin = _coerce_pin_bytes(pin)
 
         pin_data = pin
-        pin_length = len(pin)
+        pin_length = <CK_ULONG> len(pin)
 
         with nogil:
             retval = self.funclist.C_InitPIN(handle, pin_data, pin_length)
@@ -1425,6 +2809,9 @@ cdef class ObjectHandleWrapper(HasFuncList):
         cdef CK_ULONG retrievable = 0
         cdef CK_ATTRIBUTE *tpl = <CK_ATTRIBUTE *> PyMem_Malloc(total * sizeof(CK_ATTRIBUTE))
         cdef CK_RV retval
+        cdef AttributeList result
+        cdef AttributeList child
+        cdef CK_ULONG nested_count
 
         for ix in range(total):
             tpl[ix].type = keys[ix]
@@ -1438,9 +2825,7 @@ cdef class ObjectHandleWrapper(HasFuncList):
             if tpl[ix].ulValueLen != CK_UNAVAILABLE_INFORMATION:
                 # overwrite the template at position 'retrievable' in the buffer
                 tpl[retrievable].type = tpl[ix].type
-                tpl[retrievable].pValue = PyMem_Malloc(tpl[ix].ulValueLen)
-                if tpl[retrievable].pValue is NULL:
-                    raise MemoryError()
+                tpl[retrievable].pValue = NULL
                 tpl[retrievable].ulValueLen = tpl[ix].ulValueLen
                 retrievable += 1
             # The spec prohibits returning CK_UNAVAILABLE_INFORMATION
@@ -1453,13 +2838,25 @@ cdef class ObjectHandleWrapper(HasFuncList):
         # when this gets GC'd, the __dealloc__ will clean up our buffers
         result = AttributeList.from_owned_pointer(tpl, retrievable)
         if retrievable:
-            with nogil:
-                retval = self.funclist.C_GetAttributeValue(handle, obj, tpl, retrievable)
             for ix in range(retrievable):
-                # Ensure the data returned from the token is sane
-                if tpl[ix].ulValueLen == CK_UNAVAILABLE_INFORMATION or tpl[ix].pValue is NULL:
-                    retval = CKR_FUNCTION_FAILED
+                if _attribute_is_template(tpl[ix].type):
+                    nested_count = <CK_ULONG> (tpl[ix].ulValueLen / sizeof(CK_ATTRIBUTE))
+                    child = AttributeList.allocate(nested_count)
+                    result.child_values[ix] = child
+                    tpl[ix].pValue = <void *> child.data
+                elif tpl[ix].ulValueLen != 0:
+                    tpl[ix].pValue = PyMem_Malloc(tpl[ix].ulValueLen)
+                    if tpl[ix].pValue is NULL:
+                        raise MemoryError()
+
+            while True:
+                with nogil:
+                    retval = self.funclist.C_GetAttributeValue(handle, obj, tpl, retrievable)
+                if retval != CKR_OK and retval != CKR_BUFFER_TOO_SMALL:
                     break
+                if not _allocate_nested_attribute_buffers(result):
+                    break
+            _ensure_attribute_values_ready(result)
         assertRV(retval)
         return result
 
@@ -1473,12 +2870,25 @@ cdef class ObjectHandleWrapper(HasFuncList):
         cdef CK_OBJECT_HANDLE obj = self.handle
         cdef CK_ATTRIBUTE template
         cdef CK_RV retval
+        cdef AttributeList nested_template
+        cdef object packed_value
+        cdef bytes value_bytes
 
-        value = self.session.attribute_mapper.pack_attribute(key, value)
+        packed_value = self.session.attribute_mapper.pack_attribute(key, value)
 
         template.type = key
-        template.pValue = <CK_CHAR *> value
-        template.ulValueLen = <CK_ULONG>len(value)
+        if _attribute_is_template(<CK_ATTRIBUTE_TYPE> key):
+            nested_template = AttributeList.from_template(dict(packed_value), self.session.attribute_mapper)
+            template.pValue = <void *> nested_template.data
+            template.ulValueLen = nested_template.count * sizeof(CK_ATTRIBUTE)
+        else:
+            value_bytes = packed_value
+            if len(value_bytes) == 0:
+                template.pValue = NULL
+                template.ulValueLen = 0
+            else:
+                template.pValue = <CK_CHAR *> value_bytes
+                template.ulValueLen = <CK_ULONG> len(value_bytes)
 
         with nogil:
             retval = self.funclist.C_SetAttributeValue(handle, obj, &template, 1)
@@ -1757,11 +3167,11 @@ class SecretKey(types.SecretKey):
     pass
 
 
-class PublicKey(EncapsulateMixin, types.PublicKey):
+class PublicKey(types.PublicKey):
     pass
 
 
-class PrivateKey(DecapsulateMixin, types.PrivateKey):
+class PrivateKey(types.PrivateKey):
     pass
 
 
@@ -1825,6 +3235,7 @@ class Certificate(types.Certificate):
 
 cdef class KeyOperation(OperationWithBinaryOutput):
     cdef CK_OBJECT_HANDLE key
+    cdef CK_FLAGS cancel_flags
     cdef KeyOperationInit op_init
 
     @staticmethod
@@ -1856,7 +3267,19 @@ cdef class KeyOperation(OperationWithBinaryOutput):
 
     def _cancel_operation(self, silent):
         cdef CK_RV retval
-        if self.session.cancel_strategy == CancelStrategy.CANCEL_WITH_INIT:
+        if self.session.cancel_strategy == CancelStrategy.CANCEL_WITH_SESSION_CANCEL:
+            if self.cancel_flags != 0:
+                try:
+                    self.session.cancel(self.cancel_flags)
+                    return
+                except (FunctionNotSupported, NotImplementedError):
+                    pass
+                except PKCS11Error:
+                    if not silent:
+                        raise
+                    return
+            self.unclean_shutdown()
+        elif self.session.cancel_strategy == CancelStrategy.CANCEL_WITH_INIT:
             # cancel the operation if still active
             # This is a PKCS#11 3.x feature
             with nogil:
@@ -1891,6 +3314,7 @@ cdef class DataCryptOperation(KeyOperation):
             DataCryptOperation, session, mech, key, buffer_size
         )
         op.op_init = session.funclist.C_EncryptInit
+        op.cancel_flags = <CK_FLAGS> int(MechanismFlag.ENCRYPT)
         op.op_update = session.funclist.C_EncryptUpdate
         op.op_final = session.funclist.C_EncryptFinal
         op.op_full = session.funclist.C_Encrypt
@@ -1907,6 +3331,7 @@ cdef class DataCryptOperation(KeyOperation):
             DataCryptOperation, session, mech, key, buffer_size
         )
         op.op_init = session.funclist.C_DecryptInit
+        op.cancel_flags = <CK_FLAGS> int(MechanismFlag.DECRYPT)
         op.op_update = session.funclist.C_DecryptUpdate
         op.op_final = session.funclist.C_DecryptFinal
         op.op_full = session.funclist.C_Decrypt
@@ -2033,6 +3458,7 @@ cdef class DataSignOperation(SignOrVerifyOperation):
             DataSignOperation, session, mech, key, buffer_size
         )
         op.op_init = session.funclist.C_SignInit
+        op.cancel_flags = <CK_FLAGS> int(MechanismFlag.SIGN)
         op.op_update = session.funclist.C_SignUpdate
         return op
 
@@ -2092,6 +3518,7 @@ cdef class DataVerifyOperation(SignOrVerifyOperation):
             DataVerifyOperation, session, mech, key, 0
         )
         op.op_init = session.funclist.C_VerifyInit
+        op.cancel_flags = <CK_FLAGS> int(MechanismFlag.VERIFY)
         op.op_update = session.funclist.C_VerifyUpdate
         return op
 
@@ -2184,6 +3611,70 @@ class WrapMixin(types.WrapMixin):
 
         return bytes(data[:length])
 
+    def wrap_key_authenticated(self, key,
+                               associated_data=None,
+                               mechanism=None, mechanism_param=None):
+
+        if not isinstance(key, types.Key):
+            raise ArgumentsBad("`key` must be a Key.")
+
+        cdef Session session = self.session
+        cdef bytes associated_data_bytes
+        cdef CK_BYTE *aad_ptr = NULL
+        cdef CK_ULONG aad_len = 0
+        cdef CK_MECHANISM *mech_data
+        cdef CK_OBJECT_HANDLE wrapping_key = self.handle
+        cdef CK_OBJECT_HANDLE key_to_wrap = key.handle
+        cdef CK_ULONG length
+        cdef CK_RV retval
+        cdef object tag = None
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("wrap_key_authenticated requires PKCS#11 v3.2 interface")
+
+        if associated_data is not None:
+            associated_data_bytes = _coerce_message_bytes(associated_data, "associated_data")
+            aad_ptr = associated_data_bytes
+            aad_len = <CK_ULONG> len(associated_data_bytes)
+
+        mech = MechanismWithParam(self.key_type, DEFAULT_WRAP_MECHANISMS, mechanism, mechanism_param)
+        mech_data = mech.data
+
+        with nogil:
+            retval = session.funclist32.C_WrapKeyAuthenticated(
+                session.handle,
+                mech_data,
+                wrapping_key,
+                key_to_wrap,
+                aad_ptr,
+                aad_len,
+                NULL,
+                &length,
+            )
+        assertRV(retval)
+
+        cdef CK_BYTE [:] data = CK_BYTE_buffer(length or 1)
+
+        with nogil:
+            retval = session.funclist32.C_WrapKeyAuthenticated(
+                session.handle,
+                mech_data,
+                wrapping_key,
+                key_to_wrap,
+                aad_ptr,
+                aad_len,
+                &data[0],
+                &length,
+            )
+        assertRV(retval)
+
+        if isinstance(mechanism_param, GCMMessageParams):
+            tag = bytes(mechanism_param.tag[: (mechanism_param.tag_bits + 7) // 8])
+        elif isinstance(mechanism_param, CCMMessageParams):
+            tag = bytes(mechanism_param.mac[: mechanism_param.mac_len])
+
+        return bytes(data[:length]), tag
+
 
 class UnwrapMixin(types.UnwrapMixin):
     """Expand UnwrapMixin with an implementation."""
@@ -2234,6 +3725,89 @@ class UnwrapMixin(types.UnwrapMixin):
 
         with nogil:
             retval = session.funclist.C_UnwrapKey(session.handle, mech_data, unwrapping_key, wrapped_key_ptr, wrapped_key_len, attr_data, attr_count, &key)
+        assertRV(retval)
+
+        return make_object(session, key)
+
+    def unwrap_key_authenticated(self, object_class, key_type, key_data, tag,
+                                 associated_data=None,
+                                 id=None, label=None,
+                                 mechanism=None, mechanism_param=None,
+                                 store=False, capabilities=None,
+                                 template=None):
+
+        if not isinstance(object_class, ObjectClass):
+            raise ArgumentsBad("`object_class` must be ObjectClass.")
+
+        if not isinstance(key_type, KeyType):
+            raise ArgumentsBad("`key_type` must be KeyType.")
+
+        if capabilities is None:
+            try:
+                capabilities = DEFAULT_KEY_CAPABILITIES[key_type]
+            except KeyError:
+                raise ArgumentsBad("No default capabilities for this key "
+                                   "type. Please specify `capabilities`.")
+
+        cdef Session session = self.session
+        cdef bytes wrapped_key_bytes = _coerce_message_bytes(key_data, "key_data")
+        cdef bytes associated_data_bytes
+        cdef bytes tag_bytes = _coerce_message_bytes(tag, "tag")
+        cdef CK_BYTE *aad_ptr = NULL
+        cdef CK_ULONG aad_len = 0
+        cdef CK_OBJECT_HANDLE key
+        cdef CK_RV retval
+
+        if session.funclist32 == NULL:
+            raise NotImplementedError("unwrap_key_authenticated requires PKCS#11 v3.2 interface")
+
+        if associated_data is not None:
+            associated_data_bytes = _coerce_message_bytes(associated_data, "associated_data")
+            aad_ptr = associated_data_bytes
+            aad_len = <CK_ULONG> len(associated_data_bytes)
+
+        if isinstance(mechanism_param, GCMMessageParams):
+            mechanism_param.tag[:] = tag_bytes
+            if mechanism_param.tag_bits != len(tag_bytes) * 8:
+                raise ArgumentsBad("GCMMessageParams.tag_bits must match the supplied tag length.")
+        elif isinstance(mechanism_param, CCMMessageParams):
+            mechanism_param.mac[:] = tag_bytes
+            if mechanism_param.mac_len != len(tag_bytes):
+                raise ArgumentsBad("CCMMessageParams.mac_len must match the supplied tag length.")
+
+        mech = MechanismWithParam(self.key_type, DEFAULT_WRAP_MECHANISMS, mechanism, mechanism_param)
+
+        template_ = session.attribute_mapper.generic_key_template(
+            {
+                Attribute.CLASS: object_class,
+                Attribute.KEY_TYPE: key_type,
+            },
+            id_=id,
+            label=label,
+            store=store,
+            capabilities=capabilities,
+        )
+        cdef AttributeList attrs = session.make_attribute_list(merge_templates(template_, template))
+        cdef CK_MECHANISM *mech_data = mech.data
+        cdef CK_OBJECT_HANDLE unwrapping_key = self.handle
+        cdef CK_BYTE *wrapped_key_ptr = wrapped_key_bytes
+        cdef CK_ULONG wrapped_key_len = <CK_ULONG> len(wrapped_key_bytes)
+        cdef CK_ATTRIBUTE *attr_data = attrs.data
+        cdef CK_ULONG attr_count = attrs.count
+
+        with nogil:
+            retval = session.funclist32.C_UnwrapKeyAuthenticated(
+                session.handle,
+                mech_data,
+                unwrapping_key,
+                wrapped_key_ptr,
+                wrapped_key_len,
+                attr_data,
+                attr_count,
+                aad_ptr,
+                aad_len,
+                &key,
+            )
         assertRV(retval)
 
         return make_object(session, key)
@@ -2586,7 +4160,7 @@ cdef class lib(HasFuncList):
                     continue
 
                 if mechanisms is not None and \
-                        set(mechanisms) not in token_mechanisms:
+                        not set(mechanisms).issubset(token_mechanisms):
                     continue
 
                 yield token

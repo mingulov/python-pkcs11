@@ -21,6 +21,8 @@ class RSATests(TestCase):
     def test_key_length(self):
         self.assertEqual(1024, self.private.key_length)
         self.assertEqual(1024, self.public.key_length)
+        self.assertFalse(hasattr(self.public, "encapsulate_key"))
+        self.assertFalse(hasattr(self.private, "decapsulate_key"))
 
     @requires(Mechanism.RSA_PKCS)
     def test_sign_pkcs_v15(self):
@@ -40,6 +42,18 @@ class RSATests(TestCase):
         data = "INPUT"
 
         signature = private.sign(data, pin=TOKEN_PIN)
+        self.assertIsNotNone(signature)
+        self.assertIsInstance(signature, bytes)
+        self.assertTrue(public.verify(data, signature))
+
+    @requires(Mechanism.SHA512_RSA_PKCS)
+    def test_sign_with_reauthentication_bytes_pin(self):
+        public, private = self.session.generate_keypair(
+            KeyType.RSA, 1024, private_template={Attribute.ALWAYS_AUTHENTICATE: True}
+        )
+        data = "INPUT"
+
+        signature = private.sign(data, pin=TOKEN_PIN.encode("utf-8"))
         self.assertIsNotNone(signature)
         self.assertIsInstance(signature, bytes)
         self.assertTrue(public.verify(data, signature))

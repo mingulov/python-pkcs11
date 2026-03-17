@@ -29,9 +29,44 @@ class SessionTests(TestCase):
         with self.token.open(user_pin=TOKEN_PIN) as session:
             self.assertIsInstance(session, pkcs11.Session)
 
+    def test_login_logout(self):
+        with self.token.open() as session:
+            self.assertEqual(session.user_type, pkcs11.UserType.NOBODY)
+            session.login(pkcs11.UserType.USER, TOKEN_PIN)
+            self.assertEqual(session.user_type, pkcs11.UserType.USER)
+            session.logout()
+            self.assertEqual(session.user_type, pkcs11.UserType.NOBODY)
+
+    def test_login_logout_bytes_pin(self):
+        with self.token.open() as session:
+            session.login(pkcs11.UserType.USER, TOKEN_PIN.encode("utf-8"))
+            self.assertEqual(session.user_type, pkcs11.UserType.USER)
+            session.logout()
+            self.assertEqual(session.user_type, pkcs11.UserType.NOBODY)
+
+    def test_open_session_and_login_user_bytes_pin(self):
+        with self.token.open(user_pin=TOKEN_PIN.encode("utf-8")) as session:
+            self.assertIsInstance(session, pkcs11.Session)
+
+    @Only.softhsm2
+    def test_open_session_with_username_requires_v30(self):
+        with self.assertRaises(NotImplementedError):
+            self.token.open(user_pin=TOKEN_PIN, username="user")
+
+    @Only.softhsm2
+    def test_login_with_username_requires_v30(self):
+        with self.token.open() as session:
+            with self.assertRaises(NotImplementedError):
+                session.login(pkcs11.UserType.USER, TOKEN_PIN, username="user")
+
     @Only.softhsm2  # We don't have credentials to do this for other platforms
     def test_open_session_and_login_so(self):
         with self.token.open(rw=True, so_pin=TOKEN_SO_PIN) as session:
+            self.assertIsInstance(session, pkcs11.Session)
+
+    @Only.softhsm2  # We don't have credentials to do this for other platforms
+    def test_open_session_and_login_so_bytes_pin(self):
+        with self.token.open(rw=True, so_pin=TOKEN_SO_PIN.encode("utf-8")) as session:
             self.assertIsInstance(session, pkcs11.Session)
 
     @requires(pkcs11.Mechanism.AES_KEY_GEN)
@@ -293,6 +328,16 @@ class SessionTests(TestCase):
             self.assertIsInstance(bool_read, bool)
             self.assertFalse(bool_read, False)
 
+    def test_cancel_requires_v30(self):
+        with self.token.open() as session:
+            with self.assertRaises(NotImplementedError):
+                session.cancel()
+
+    def test_get_validation_flags_requires_v32(self):
+        with self.token.open() as session:
+            with self.assertRaises(NotImplementedError):
+                session.get_validation_flags()
+
     @Only.softhsm2
     def test_set_pin(self):
         old_token_pin = TOKEN_PIN
@@ -321,6 +366,23 @@ class SessionTests(TestCase):
                 session.set_pin("", new_token_pin)
 
     @Only.softhsm2
+    def test_set_pin_accepts_bytes(self):
+        old_token_pin = TOKEN_PIN.encode("utf-8")
+        new_token_pin = f"{TOKEN_PIN}56".encode("utf-8")
+
+        with self.token.open(rw=True, user_pin=old_token_pin) as session:
+            session.set_pin(old_token_pin, new_token_pin)
+
+        with self.token.open(user_pin=new_token_pin) as session:
+            self.assertIsInstance(session, pkcs11.Session)
+
+        with self.token.open(rw=True, user_pin=new_token_pin) as session:
+            session.set_pin(new_token_pin, old_token_pin)
+
+        with self.token.open(user_pin=old_token_pin) as session:
+            self.assertIsInstance(session, pkcs11.Session)
+
+    @Only.softhsm2
     def test_init_pin(self):
         new_token_pin = f"{TOKEN_PIN}56"
 
@@ -341,3 +403,20 @@ class SessionTests(TestCase):
                 session.init_pin(None)
             with self.assertRaises(PinLenRange):
                 session.init_pin("")
+
+    @Only.softhsm2
+    def test_init_pin_accepts_bytes(self):
+        new_token_pin = f"{TOKEN_PIN}56".encode("utf-8")
+        token_pin = TOKEN_PIN.encode("utf-8")
+
+        with self.token.open(rw=True, so_pin=TOKEN_SO_PIN.encode("utf-8")) as session:
+            session.init_pin(new_token_pin)
+
+        with self.token.open(rw=True, user_pin=new_token_pin) as session:
+            self.assertIsInstance(session, pkcs11.Session)
+
+        with self.token.open(rw=True, so_pin=TOKEN_SO_PIN.encode("utf-8")) as session:
+            session.init_pin(token_pin)
+
+        with self.token.open(rw=True, user_pin=token_pin) as session:
+            self.assertIsInstance(session, pkcs11.Session)

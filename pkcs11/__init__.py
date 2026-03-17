@@ -16,7 +16,14 @@ if TYPE_CHECKING:
     from pkcs11._pkcs11 import lib as _lib_type
 
 
-_loaded: dict[str, Any] = {}
+_loaded: dict[tuple[str, str], Any] = {}
+
+
+def _is_compatible_request(loaded_lib: Any, interface: str) -> bool:
+    if interface == "auto":
+        return True
+
+    return loaded_lib.interface_version == interface
 
 
 def lib(so: str, interface: str = "auto") -> _lib_type:
@@ -30,9 +37,10 @@ def lib(so: str, interface: str = "auto") -> _lib_type:
     """
     global _loaded
 
-    # Cache key includes the requested interface so different interface
-    # versions of the same library are loaded as separate instances.
-    cache_key = f"{so}:{interface}"
+    # Cache by requested interface, but reuse a compatible live instance for
+    # the same module so we don't try to initialize the same PKCS#11 library
+    # twice in one process.
+    cache_key = (so, interface)
 
     try:
         _lib = _loaded[cache_key]
@@ -41,6 +49,19 @@ def lib(so: str, interface: str = "auto") -> _lib_type:
         return _lib
     except KeyError:
         pass
+
+    for loaded_key, loaded_lib in _loaded.items():
+        if loaded_key[0] != so:
+            continue
+        if not _is_compatible_request(loaded_lib, interface):
+            raise RuntimeError(
+                f"{so} is already loaded with interface {loaded_lib.interface_version}; "
+                f"unload it before requesting interface {interface}"
+            )
+        if not loaded_lib.initialized:
+            loaded_lib.initialize()
+        _loaded[cache_key] = loaded_lib
+        return loaded_lib
 
     from . import _pkcs11
 
@@ -52,9 +73,15 @@ def lib(so: str, interface: str = "auto") -> _lib_type:
 
 def unload(so: str) -> None:
     global _loaded
-    try:
-        loaded_lib = _loaded[so]
-    except KeyError:
+
+    cache_keys = [key for key in _loaded if key[0] == so]
+    if not cache_keys:
         return
-    del _loaded[so]
-    loaded_lib.unload()
+
+    unloaded = set()
+    for cache_key in cache_keys:
+        loaded_lib = _loaded.pop(cache_key)
+        if id(loaded_lib) in unloaded:
+            continue
+        loaded_lib.unload()
+        unloaded.add(id(loaded_lib))

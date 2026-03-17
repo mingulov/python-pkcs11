@@ -2,6 +2,8 @@
 PKCS#11 Slots and Tokens
 """
 
+import os
+import tempfile
 import unittest
 
 import pkcs11
@@ -81,6 +83,56 @@ class SlotsAndTokensTests(unittest.TestCase):
         slots = lib.get_slots()
         self.assertGreaterEqual(len(slots), 1)
 
+    def test_unload_clears_explicit_interface_cache(self):
+        pkcs11.unload(LIB)
+        v240_lib = pkcs11.lib(LIB, interface="2.40")
+
+        pkcs11.unload(LIB)
+
+        reloaded = pkcs11.lib(LIB, interface="2.40")
+        self.assertIsNot(v240_lib, reloaded)
+        pkcs11.unload(LIB)
+
+    @Only.softhsm2
+    def test_init_token(self):
+        original_conf = os.environ.get("SOFTHSM2_CONF")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            token_dir = os.path.join(tmpdir, "tokens")
+            conf = os.path.join(tmpdir, "softhsm2.conf")
+            os.mkdir(token_dir)
+            with open(conf, "w", encoding="ascii") as handle:
+                handle.write(
+                    "\n".join(
+                        (
+                            f"directories.tokendir = {token_dir}",
+                            "objectstore.backend = file",
+                            "log.level = INFO",
+                            "slots.removable = false",
+                        )
+                    )
+                )
+
+            try:
+                if original_conf is None:
+                    os.environ.pop("SOFTHSM2_CONF", None)
+                os.environ["SOFTHSM2_CONF"] = conf
+                pkcs11.unload(LIB)
+
+                lib = pkcs11.lib(LIB)
+                slot, *_ = lib.get_slots()
+                slot.init_token("INIT TOKEN", b"5678")
+                token = slot.get_token()
+
+                self.assertEqual(token.label, "INIT TOKEN")
+                self.assertIn(pkcs11.TokenFlag.TOKEN_INITIALIZED, token.flags)
+            finally:
+                pkcs11.unload(LIB)
+                if original_conf is None:
+                    os.environ.pop("SOFTHSM2_CONF", None)
+                else:
+                    os.environ["SOFTHSM2_CONF"] = original_conf
+
     def test_get_mechanism_info(self):
         lib = pkcs11.lib(LIB)
         slot, *_ = lib.get_slots()
@@ -105,6 +157,21 @@ class SlotsAndTokensTests(unittest.TestCase):
 
         tokens = lib.get_tokens(token_label=TOKEN)
         self.assertEqual(len(list(tokens)), 1)
+
+    @Only.softhsm2
+    def test_get_tokens_by_mechanism_subset(self):
+        lib = pkcs11.lib(LIB)
+        token = lib.get_token(token_label=TOKEN)
+        mechanisms = tuple(token.slot.get_mechanisms())
+        self.assertGreaterEqual(len(mechanisms), 1)
+
+        tokens = list(
+            lib.get_tokens(
+                token_label=TOKEN,
+                mechanisms=mechanisms[: min(len(mechanisms), 2)],
+            )
+        )
+        self.assertEqual(len(tokens), 1)
 
     @Only.softhsm2
     def test_get_token(self):

@@ -16,11 +16,13 @@ cdef extern from '../extern/cryptoki.h':
     ctypedef CK_ULONG CK_ATTRIBUTE_TYPE
     ctypedef CK_ULONG CK_EC_KDF_TYPE
     ctypedef CK_ULONG CK_FLAGS
+    ctypedef CK_ULONG CK_GENERATOR_FUNCTION
     ctypedef CK_ULONG CK_MECHANISM_TYPE
     ctypedef CK_ULONG CK_OBJECT_HANDLE
     ctypedef CK_ULONG CK_RSA_PKCS_MGF_TYPE
     ctypedef CK_ULONG CK_RSA_PKCS_OAEP_SOURCE_TYPE
     ctypedef CK_ULONG CK_SESSION_HANDLE
+    ctypedef CK_ULONG CK_SESSION_VALIDATION_FLAGS_TYPE
     ctypedef CK_ULONG CK_SLOT_ID
     ctypedef CK_ULONG CK_STATE
 
@@ -136,6 +138,8 @@ cdef extern from '../extern/cryptoki.h':
         CKR_LIBRARY_LOAD_FAILED,
         CKR_PIN_TOO_WEAK,
         CKR_PUBLIC_KEY_INVALID,
+        CKR_PENDING,
+        CKR_SESSION_ASYNC_NOT_SUPPORTED,
 
         CKR_FUNCTION_REJECTED,
 
@@ -165,9 +169,19 @@ cdef extern from '../extern/cryptoki.h':
         CK_EFFECTIVELY_INFINITE,
 
     cdef enum:  # CK_FLAGS
+        CKF_END_OF_MESSAGE,
         CKF_DONT_BLOCK,
         CKF_RW_SESSION,
         CKF_SERIAL_SESSION,
+        CKF_ASYNC_SESSION,
+        CKF_ASYNC_SESSION_SUPPORTED,
+
+    cdef enum:  # CKG
+        CKG_NO_GENERATE,
+        CKG_GENERATE,
+        CKG_GENERATE_COUNTER,
+        CKG_GENERATE_RANDOM,
+        CKG_GENERATE_COUNTER_XOR,
 
     cdef enum:  # CKZ
         CKZ_DATA_SPECIFIED,
@@ -272,6 +286,23 @@ cdef extern from '../extern/cryptoki.h':
         CK_ULONG ulAADLen
         CK_ULONG ulTagBits
 
+    ctypedef struct CK_GCM_MESSAGE_PARAMS:
+        CK_BYTE *pIv
+        CK_ULONG ulIvLen
+        CK_ULONG ulIvFixedBits
+        CK_GENERATOR_FUNCTION ivGenerator
+        CK_BYTE *pTag
+        CK_ULONG ulTagBits
+
+    ctypedef struct CK_GCM_WRAP_PARAMS:
+        CK_BYTE *pIv
+        CK_ULONG ulIvLen
+        CK_ULONG ulIvFixedBits
+        CK_GENERATOR_FUNCTION ivGenerator
+        CK_BYTE *pAAD
+        CK_ULONG ulAADLen
+        CK_ULONG ulTagBits
+
     ctypedef struct CK_KEY_DERIVATION_STRING_DATA:
         CK_BYTE *pData
         CK_ULONG ulLen
@@ -280,6 +311,58 @@ cdef extern from '../extern/cryptoki.h':
         CK_BYTE iv[16]
         CK_BYTE *pData
         CK_ULONG length
+
+    ctypedef CK_ULONG CK_PRF_DATA_TYPE
+    ctypedef CK_MECHANISM_TYPE CK_SP800_108_PRF_TYPE
+
+    cdef enum:
+        CK_SP800_108_ITERATION_VARIABLE = 0x00000001
+        CK_SP800_108_OPTIONAL_COUNTER = 0x00000002
+        CK_SP800_108_DKM_LENGTH = 0x00000003
+        CK_SP800_108_BYTE_ARRAY = 0x00000004
+        CK_SP800_108_COUNTER = 0x00000002
+        CK_SP800_108_KEY_HANDLE = 0x00000005
+
+    ctypedef struct CK_PRF_DATA_PARAM:
+        CK_PRF_DATA_TYPE type
+        void *pValue
+        CK_ULONG ulValueLen
+
+    ctypedef struct CK_SP800_108_COUNTER_FORMAT:
+        CK_BBOOL bLittleEndian
+        CK_ULONG ulWidthInBits
+
+    ctypedef CK_ULONG CK_SP800_108_DKM_LENGTH_METHOD
+
+    cdef enum:
+        CK_SP800_108_DKM_LENGTH_SUM_OF_KEYS = 0x00000001
+        CK_SP800_108_DKM_LENGTH_SUM_OF_SEGMENTS = 0x00000002
+
+    ctypedef struct CK_SP800_108_DKM_LENGTH_FORMAT:
+        CK_SP800_108_DKM_LENGTH_METHOD dkmLengthMethod
+        CK_BBOOL bLittleEndian
+        CK_ULONG ulWidthInBits
+
+    ctypedef struct CK_DERIVED_KEY:
+        CK_ATTRIBUTE *pTemplate
+        CK_ULONG ulAttributeCount
+        CK_OBJECT_HANDLE *phKey
+
+    ctypedef struct CK_SP800_108_KDF_PARAMS:
+        CK_SP800_108_PRF_TYPE prfType
+        CK_ULONG ulNumberOfDataParams
+        CK_PRF_DATA_PARAM *pDataParams
+        CK_ULONG ulAdditionalDerivedKeys
+        CK_DERIVED_KEY *pAdditionalDerivedKeys
+
+    ctypedef struct CK_SP800_108_FEEDBACK_KDF_PARAMS:
+        CK_SP800_108_PRF_TYPE prfType
+        CK_ULONG ulNumberOfDataParams
+        CK_PRF_DATA_PARAM *pDataParams
+        CK_ULONG ulIVLen
+        CK_BYTE *pIV
+        CK_ULONG ulAdditionalDerivedKeys
+        CK_DERIVED_KEY *pAdditionalDerivedKeys
 
     ctypedef struct CK_EDDSA_PARAMS:
        CK_BBOOL phFlag
@@ -290,6 +373,25 @@ cdef extern from '../extern/cryptoki.h':
         CK_ULONG ulDataLen
         CK_BYTE *pNonce
         CK_ULONG ulNonceLen
+        CK_BYTE *pAAD
+        CK_ULONG ulAADLen
+        CK_ULONG ulMACLen
+
+    ctypedef struct CK_CCM_MESSAGE_PARAMS:
+        CK_ULONG ulDataLen
+        CK_BYTE *pNonce
+        CK_ULONG ulNonceLen
+        CK_ULONG ulNonceFixedBits
+        CK_GENERATOR_FUNCTION nonceGenerator
+        CK_BYTE *pMAC
+        CK_ULONG ulMACLen
+
+    ctypedef struct CK_CCM_WRAP_PARAMS:
+        CK_ULONG ulDataLen
+        CK_BYTE *pNonce
+        CK_ULONG ulNonceLen
+        CK_ULONG ulNonceFixedBits
+        CK_GENERATOR_FUNCTION nonceGenerator
         CK_BYTE *pAAD
         CK_ULONG ulAADLen
         CK_ULONG ulMACLen
@@ -382,6 +484,13 @@ cdef extern from '../extern/cryptoki.h':
         CK_BYTE iv[8]
         CK_BYTE *pData
         CK_ULONG length
+
+    ctypedef struct CK_ASYNC_DATA:
+        CK_ULONG ulVersion
+        CK_BYTE *pValue
+        CK_ULONG ulValue
+        CK_OBJECT_HANDLE hObject
+        CK_OBJECT_HANDLE hAdditionalObject
 
     cdef struct CK_FUNCTION_LIST:
         CK_VERSION version
@@ -1288,7 +1397,9 @@ cdef extern from '../extern/cryptoki.h':
         ## Signature is embedded in mechanism_param; data is streamed separately.
         CK_RV C_VerifySignatureInit(CK_SESSION_HANDLE session,
                                     CK_MECHANISM *mechanism,
-                                    CK_OBJECT_HANDLE hKey) nogil
+                                    CK_OBJECT_HANDLE hKey,
+                                    CK_BYTE *pSignature,
+                                    CK_ULONG ulSignatureLen) nogil
         CK_RV C_VerifySignature(CK_SESSION_HANDLE session,
                                 CK_BYTE *data,
                                 CK_ULONG dataLen) nogil
@@ -1298,36 +1409,35 @@ cdef extern from '../extern/cryptoki.h':
         CK_RV C_VerifySignatureFinal(CK_SESSION_HANDLE session) nogil
         ## Remaining v3.2 functions (stub layout to preserve correct struct offsets)
         CK_RV C_GetSessionValidationFlags(CK_SESSION_HANDLE session,
-                                          CK_FLAGS flags,
+                                          CK_SESSION_VALIDATION_FLAGS_TYPE type,
                                           CK_FLAGS *pFlags) nogil
         CK_RV C_AsyncComplete(CK_SESSION_HANDLE session,
                               CK_UTF8CHAR *pOperation,
-                              CK_ULONG ulOperationLen) nogil
+                              CK_ASYNC_DATA *pResult) nogil
         CK_RV C_AsyncGetID(CK_SESSION_HANDLE session,
                            CK_UTF8CHAR *pOperation,
-                           CK_ULONG *pulOperationLen) nogil
+                           CK_ULONG *pulID) nogil
         CK_RV C_AsyncJoin(CK_SESSION_HANDLE session,
                           CK_UTF8CHAR *pOperation,
-                          CK_ULONG ulOperationLen,
+                          CK_ULONG ulID,
                           CK_BYTE *pData,
-                          CK_ULONG ulDataLen) nogil
+                          CK_ULONG ulData) nogil
         CK_RV C_WrapKeyAuthenticated(CK_SESSION_HANDLE session,
                                      CK_MECHANISM *mechanism,
                                      CK_OBJECT_HANDLE hWrappingKey,
                                      CK_OBJECT_HANDLE hKey,
-                                     CK_BYTE *pAad, CK_ULONG ulAadLen,
+                                     CK_BYTE *pAssociatedData, CK_ULONG ulAssociatedDataLen,
                                      CK_BYTE *pWrappedKey,
-                                     CK_ULONG *pulWrappedKeyLen,
-                                     CK_BYTE *pTag, CK_ULONG *pulTagLen) nogil
+                                     CK_ULONG *pulWrappedKeyLen) nogil
         CK_RV C_UnwrapKeyAuthenticated(CK_SESSION_HANDLE session,
                                        CK_MECHANISM *mechanism,
                                        CK_OBJECT_HANDLE hUnwrappingKey,
                                        CK_BYTE *pWrappedKey,
                                        CK_ULONG ulWrappedKeyLen,
-                                       CK_BYTE *pAad, CK_ULONG ulAadLen,
-                                       CK_BYTE *pTag, CK_ULONG ulTagLen,
                                        CK_ATTRIBUTE *templ,
                                        CK_ULONG ulAttributeCount,
+                                       CK_BYTE *pAssociatedData,
+                                       CK_ULONG ulAssociatedDataLen,
                                        CK_OBJECT_HANDLE *phKey) nogil
 
 # The only external API call that must be defined in a PKCS#11 library
@@ -1448,6 +1558,8 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
         exc = OperationActive()
     elif rv == CKR_OPERATION_NOT_INITIALIZED:
         exc = OperationNotInitialized()
+    elif rv == CKR_PENDING:
+        exc = Pending()
     elif rv == CKR_PIN_EXPIRED:
         exc = PinExpired()
     elif rv == CKR_PIN_INCORRECT:
@@ -1470,6 +1582,8 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
         exc = SessionClosed()
     elif rv == CKR_SESSION_COUNT:
         exc = SessionCount()
+    elif rv == CKR_SESSION_ASYNC_NOT_SUPPORTED:
+        exc = SessionAsyncNotSupported()
     elif rv == CKR_SESSION_EXISTS:
         exc = SessionExists()
     elif rv == CKR_SESSION_HANDLE_INVALID:
@@ -1492,6 +1606,10 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
         exc = TemplateInconsistent()
     elif rv == CKR_SLOT_ID_INVALID:
         exc = SlotIDInvalid()
+    elif rv == CKR_SAVED_STATE_INVALID:
+        exc = SavedStateInvalid()
+    elif rv == CKR_STATE_UNSAVEABLE:
+        exc = StateUnsaveable()
     elif rv == CKR_TOKEN_NOT_PRESENT:
         exc = TokenNotPresent()
     elif rv == CKR_TOKEN_NOT_RECOGNIZED:

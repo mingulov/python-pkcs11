@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import IntEnum
 
+from pkcs11.constants import GeneratorFunction
 from pkcs11.exceptions import ArgumentsBad
 
 
@@ -113,11 +114,20 @@ class KeyType(IntEnum):
     SHA512_224_HMAC = 0x00000043
     SHA512_256_HMAC = 0x00000044
     SHA512_T_HMAC = 0x00000045
-    AES_XTS = 0x00000046
     CHACHA20 = 0x00000033
-    POLY1305 = 0x00000035
+    POLY1305 = 0x00000034
+    AES_XTS = 0x00000035
+    BLAKE2B_160_HMAC = 0x0000003A
+    BLAKE2B_256_HMAC = 0x0000003B
+    BLAKE2B_384_HMAC = 0x0000003C
+    BLAKE2B_512_HMAC = 0x0000003D
+    SALSA20 = 0x0000003E
+    X2RATCHET = 0x0000003F
 
-    # PKCS#11 v3.2 — PQC key types
+    # PKCS#11 v3.2 — additional and PQC key types
+    HSS = 0x00000046
+    XMSS = 0x00000047
+    XMSSMT = 0x00000048
     ML_KEM = 0x00000049
     """ML-KEM (CRYSTALS-Kyber) post-quantum KEM key (FIPS 203)."""
     ML_DSA = 0x0000004A
@@ -823,6 +833,14 @@ class Mechanism(IntEnum):
 
     # Note: SHA3 KEY_DERIVATION already defined above (0x397-0x39A)
 
+    # PKCS#11 v3.2 — HSS/XMSS/XMSSMT hash-based signatures
+    HSS_KEY_PAIR_GEN = 0x00004032
+    HSS = 0x00004033
+    XMSS_KEY_PAIR_GEN = 0x00004034
+    XMSSMT_KEY_PAIR_GEN = 0x00004035
+    XMSS = 0x00004036
+    XMSSMT = 0x00004037
+
     # PKCS#11 v3.2 — ML-KEM (CRYSTALS-Kyber, FIPS 203) post-quantum KEM
     ML_KEM_KEY_PAIR_GEN = 0x0000000F
     """Generate an ML-KEM key pair."""
@@ -931,6 +949,102 @@ class PBKDF2PRF(IntEnum):
     HMAC_SHA512_256 = 0x00000008
 
 
+class SP800108DataType(IntEnum):
+    """Flexible KDF data-field selectors for the SP 800-108 mechanisms."""
+
+    ITERATION_VARIABLE = 0x00000001
+    OPTIONAL_COUNTER = 0x00000002
+    COUNTER = 0x00000002
+    DKM_LENGTH = 0x00000003
+    BYTE_ARRAY = 0x00000004
+    KEY_HANDLE = 0x00000005
+
+
+class SP800108DKMLengthMethod(IntEnum):
+    """Derived-key-length formatting methods for SP 800-108."""
+
+    SUM_OF_KEYS = 0x00000001
+    SUM_OF_SEGMENTS = 0x00000002
+
+
+class SP800108CounterFormat:
+    """Counter-field format for SP 800-108 iteration/counter parameters."""
+
+    little_endian: bool
+    width_in_bits: int
+
+    def __init__(self, width_in_bits: int, *, little_endian: bool = False) -> None:
+        if width_in_bits <= 0:
+            raise ArgumentsBad("width_in_bits must be > 0")
+        self.little_endian = little_endian
+        self.width_in_bits = width_in_bits
+
+
+class SP800108DKMLengthFormat:
+    """Derived-key-length field format for SP 800-108."""
+
+    method: SP800108DKMLengthMethod | int
+    little_endian: bool
+    width_in_bits: int
+
+    def __init__(
+        self,
+        method: SP800108DKMLengthMethod | int,
+        width_in_bits: int,
+        *,
+        little_endian: bool = False,
+    ) -> None:
+        if width_in_bits <= 0:
+            raise ArgumentsBad("width_in_bits must be > 0")
+        self.method = method
+        self.little_endian = little_endian
+        self.width_in_bits = width_in_bits
+
+
+class SP800108DataParam:
+    """One data-field entry in an SP 800-108 KDF parameter list."""
+
+    data_type: SP800108DataType | int
+    value: object
+
+    def __init__(self, data_type: SP800108DataType | int, value: object) -> None:
+        self.data_type = data_type
+        self.value = value
+
+
+class SP800108KDFParams:
+    """Parameters for counter-mode and double-pipeline SP 800-108 KDFs."""
+
+    prf_type: Mechanism | int
+    data_params: tuple[SP800108DataParam, ...]
+
+    def __init__(
+        self,
+        prf_type: Mechanism | int,
+        data_params: list[SP800108DataParam] | tuple[SP800108DataParam, ...],
+    ) -> None:
+        if not data_params:
+            raise ArgumentsBad("data_params must not be empty")
+        self.prf_type = prf_type
+        self.data_params = tuple(data_params)
+
+
+class SP800108FeedbackKDFParams(SP800108KDFParams):
+    """Parameters for feedback-mode SP 800-108 KDFs."""
+
+    iv: bytes
+
+    def __init__(
+        self,
+        prf_type: Mechanism | int,
+        data_params: list[SP800108DataParam] | tuple[SP800108DataParam, ...],
+        *,
+        iv: bytes = b"",
+    ) -> None:
+        super().__init__(prf_type, data_params)
+        self.iv = iv
+
+
 class GCMParams:
     """Parameters for AES-GCM mode."""
 
@@ -947,6 +1061,162 @@ class GCMParams:
         self.nonce = nonce
         self.aad = aad
         self.tag_bits = tag_bits
+
+
+def _coerce_bytearray(value: bytes | bytearray | memoryview, *, field: str) -> bytearray:
+    if isinstance(value, bytearray):
+        return value
+    if isinstance(value, bytes):
+        return bytearray(value)
+    if isinstance(value, memoryview):
+        return bytearray(value.tobytes())
+    raise ArgumentsBad(f"{field} must be bytes-like")
+
+
+class GCMMessageParams:
+    """Parameters for PKCS#11 message/authenticated-wrap AES-GCM operations."""
+
+    iv: bytearray
+    iv_fixed_bits: int
+    iv_generator: GeneratorFunction | int
+    tag: bytearray
+    tag_bits: int
+
+    def __init__(
+        self,
+        iv: bytes | bytearray | memoryview,
+        tag: bytes | bytearray | memoryview,
+        *,
+        iv_fixed_bits: int = 0,
+        iv_generator: GeneratorFunction | int = GeneratorFunction.NO_GENERATE,
+        tag_bits: int | None = None,
+    ) -> None:
+        self.iv = _coerce_bytearray(iv, field="iv")
+        self.tag = _coerce_bytearray(tag, field="tag")
+        self.iv_fixed_bits = iv_fixed_bits
+        self.iv_generator = iv_generator
+        self.tag_bits = len(self.tag) * 8 if tag_bits is None else tag_bits
+
+        if len(self.iv) == 0:
+            raise ArgumentsBad("GCM message IV buffer must not be empty")
+        if len(self.tag) == 0:
+            raise ArgumentsBad("GCM message tag buffer must not be empty")
+        if self.iv_fixed_bits < 0:
+            raise ArgumentsBad("iv_fixed_bits must be >= 0")
+        if self.tag_bits <= 0:
+            raise ArgumentsBad("tag_bits must be > 0")
+        if self.tag_bits > len(self.tag) * 8:
+            raise ArgumentsBad("tag_bits exceeds the supplied tag buffer")
+
+
+class GCMWrapParams:
+    """Parameters for PKCS#11 AES-GCM WrapKey/UnwrapKey operations."""
+
+    iv: bytearray
+    aad: bytes | None
+    iv_fixed_bits: int
+    iv_generator: GeneratorFunction | int
+    tag_bits: int
+
+    def __init__(
+        self,
+        iv: bytes | bytearray | memoryview,
+        aad: bytes | None = None,
+        *,
+        iv_fixed_bits: int = 0,
+        iv_generator: GeneratorFunction | int = GeneratorFunction.NO_GENERATE,
+        tag_bits: int = 128,
+    ) -> None:
+        self.iv = _coerce_bytearray(iv, field="iv")
+        self.aad = aad
+        self.iv_fixed_bits = iv_fixed_bits
+        self.iv_generator = iv_generator
+        self.tag_bits = tag_bits
+
+        if len(self.iv) == 0:
+            raise ArgumentsBad("GCM wrap IV buffer must not be empty")
+        if self.iv_fixed_bits < 0:
+            raise ArgumentsBad("iv_fixed_bits must be >= 0")
+        if self.tag_bits <= 0:
+            raise ArgumentsBad("tag_bits must be > 0")
+
+
+class CCMMessageParams:
+    """Parameters for PKCS#11 message/authenticated-wrap AES-CCM operations."""
+
+    data_len: int
+    nonce: bytearray
+    nonce_fixed_bits: int
+    nonce_generator: GeneratorFunction | int
+    mac: bytearray
+    mac_len: int
+
+    def __init__(
+        self,
+        data_len: int,
+        nonce: bytes | bytearray | memoryview,
+        mac: bytes | bytearray | memoryview,
+        *,
+        nonce_fixed_bits: int = 0,
+        nonce_generator: GeneratorFunction | int = GeneratorFunction.NO_GENERATE,
+        mac_len: int | None = None,
+    ) -> None:
+        self.data_len = data_len
+        self.nonce = _coerce_bytearray(nonce, field="nonce")
+        self.mac = _coerce_bytearray(mac, field="mac")
+        self.nonce_fixed_bits = nonce_fixed_bits
+        self.nonce_generator = nonce_generator
+        self.mac_len = len(self.mac) if mac_len is None else mac_len
+
+        if self.data_len < 0:
+            raise ArgumentsBad("data_len must be >= 0")
+        if len(self.nonce) == 0:
+            raise ArgumentsBad("CCM message nonce buffer must not be empty")
+        if len(self.mac) == 0:
+            raise ArgumentsBad("CCM message MAC buffer must not be empty")
+        if self.nonce_fixed_bits < 0:
+            raise ArgumentsBad("nonce_fixed_bits must be >= 0")
+        if self.mac_len <= 0:
+            raise ArgumentsBad("mac_len must be > 0")
+        if self.mac_len > len(self.mac):
+            raise ArgumentsBad("mac_len exceeds the supplied MAC buffer")
+
+
+class CCMWrapParams:
+    """Parameters for PKCS#11 AES-CCM WrapKey/UnwrapKey operations."""
+
+    data_len: int
+    nonce: bytearray
+    aad: bytes | None
+    nonce_fixed_bits: int
+    nonce_generator: GeneratorFunction | int
+    mac_len: int
+
+    def __init__(
+        self,
+        data_len: int,
+        nonce: bytes | bytearray | memoryview,
+        aad: bytes | None = None,
+        *,
+        nonce_fixed_bits: int = 0,
+        nonce_generator: GeneratorFunction | int = GeneratorFunction.NO_GENERATE,
+        mac_len: int = 16,
+    ) -> None:
+        self.data_len = data_len
+        self.nonce = _coerce_bytearray(nonce, field="nonce")
+        self.aad = aad
+        self.nonce_fixed_bits = nonce_fixed_bits
+        self.nonce_generator = nonce_generator
+        self.mac_len = mac_len
+
+        if self.data_len < 0:
+            raise ArgumentsBad("data_len must be >= 0")
+        if len(self.nonce) == 0:
+            raise ArgumentsBad("CCM wrap nonce buffer must not be empty")
+        if self.nonce_fixed_bits < 0:
+            raise ArgumentsBad("nonce_fixed_bits must be >= 0")
+        if self.mac_len <= 0:
+            raise ArgumentsBad("mac_len must be > 0")
 
 
 class CTRParams:

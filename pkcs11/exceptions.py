@@ -239,6 +239,10 @@ class OperationNotInitialized(PKCS11Error):
     pass
 
 
+class Pending(PKCS11Error):
+    """The operation is executing asynchronously and has not completed yet."""
+
+
 class PinExpired(PKCS11Error):
     pass
 
@@ -288,6 +292,10 @@ class SessionCount(PKCS11Error):
     """
 
 
+class SessionAsyncNotSupported(PKCS11Error):
+    """The token does not support asynchronous sessions."""
+
+
 class SessionExists(PKCS11Error):
     pass
 
@@ -325,6 +333,14 @@ class SignatureInvalid(PKCS11Error):
 
 class SlotIDInvalid(PKCS11Error):
     pass
+
+
+class SavedStateInvalid(PKCS11Error):
+    """The saved asynchronous operation identifier is invalid."""
+
+
+class StateUnsaveable(PKCS11Error):
+    """The module cannot persist the asynchronous operation state."""
 
 
 class TemplateIncomplete(PKCS11Error):

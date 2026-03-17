@@ -7,12 +7,21 @@ from typing import Any, Iterator
 from pkcs11.types import (
     EncapsulateMixin,
     DecapsulateMixin,
-    HasKeyType,
-    Slot,
-    Token,
+    Object as _ObjectType,
+    Session as _SessionType,
+    Slot as _SlotType,
+    Token as _TokenType,
 )
 
-__all__ = ["lib", "EncapsulateMixin", "DecapsulateMixin"]
+__all__ = ["lib", "Slot", "Token", "Session", "Object", "EncapsulateMixin", "DecapsulateMixin"]
+
+class Slot(_SlotType): ...
+
+class Token(_TokenType): ...
+
+class Session(_SessionType): ...
+
+class Object(_ObjectType): ...
 
 class lib:
     """Main entry point for PKCS#11 library."""

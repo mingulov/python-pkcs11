@@ -15,7 +15,9 @@ from pkcs11.constants import (
     Attribute,
     CertificateType,
     MechanismFlag,
+    MessageFlag,
     ObjectClass,
+    SessionValidationFlagsType,
     SlotFlag,
     TokenFlag,
     UserType,
@@ -28,7 +30,16 @@ from pkcs11.exceptions import (
     SignatureInvalid,
     SignatureLenRange,
 )
-from pkcs11.mechanisms import KeyType, Mechanism
+from pkcs11.mechanisms import (
+    CCMMessageParams,
+    CCMWrapParams,
+    GCMMessageParams,
+    GCMWrapParams,
+    KeyType,
+    Mechanism,
+    SP800108FeedbackKDFParams,
+    SP800108KDFParams,
+)
 
 if TYPE_CHECKING:
     from pkcs11.attributes import AttributeMapper
@@ -120,6 +131,26 @@ class MechanismInfo:
         )
 
 
+class AsyncResult:
+    """Result returned by :meth:`Session.async_complete`."""
+
+    __slots__ = ("value", "object", "additional_object")
+
+    value: bytes | None
+    object: Object | None
+    additional_object: Object | None
+
+    def __init__(
+        self,
+        value: bytes | None = None,
+        object: Object | None = None,
+        additional_object: Object | None = None,
+    ) -> None:
+        self.value = value
+        self.object = object
+        self.additional_object = additional_object
+
+
 class Slot(IdentifiedBy):
     """
     A PKCS#11 device slot.
@@ -191,6 +222,15 @@ class Slot(IdentifiedBy):
         """
         raise NotImplementedError()
 
+    def init_token(self, label: str, so_pin: str | bytes) -> None:
+        """
+        Initialize or reinitialize the token in this slot.
+
+        :param str label: Token label. Must fit within the PKCS#11 32-byte label field.
+        :param bytes so_pin: Security officer PIN.
+        """
+        raise NotImplementedError()
+
 
 class Token(IdentifiedBy):
     """
@@ -247,6 +287,8 @@ class Token(IdentifiedBy):
         rw: bool = False,
         user_pin: str | bytes | object | None = None,
         so_pin: str | bytes | object | None = None,
+        async_: bool = False,
+        username: str | bytes | None = None,
         user_type: UserType | None = None,
         attribute_mapper: AttributeMapper | None = None,
         cancel_strategy: CancelStrategy = CancelStrategy.DEFAULT,
@@ -268,6 +310,8 @@ class Token(IdentifiedBy):
         :param bytes user_pin: Authenticate to this session as a user.
         :param bytes so_pin: Authenticate to this session as a
             security officer.
+        :param async_: Request a PKCS#11 v3.2 asynchronous session.
+        :param bytes username: Optional PKCS#11 v3.0+ username for ``C_LoginUser``.
         :param user_type: Sets the userType parameter to C_Login.
             Allows for vendor-defined values. Defaults to UserType.SO if
             so_pin is set, otherwise UserType.USER.
@@ -315,11 +359,254 @@ class Session(IdentifiedBy):
         """True if this is a read/write session."""
         raise NotImplementedError()
 
+    @property
+    def async_(self) -> bool:
+        """True if this session was opened as asynchronous (PKCS#11 v3.2)."""
+        raise NotImplementedError()
+
     def close(self) -> None:
         """Close the session."""
         raise NotImplementedError()
 
+    def login(
+        self,
+        user_type: UserType | int = UserType.USER,
+        pin: str | bytes | object | None = None,
+        username: str | bytes | None = None,
+    ) -> None:
+        """
+        Log into this session.
+
+        When ``username`` is provided, this uses ``C_LoginUser`` and therefore
+        requires a PKCS#11 v3.0+ interface.
+        """
+        raise NotImplementedError()
+
+    def logout(self) -> None:
+        """Log out of this session."""
+        raise NotImplementedError()
+
     def reaffirm_credentials(self, pin: str | bytes) -> None:
+        raise NotImplementedError()
+
+    def cancel(self, flags: MechanismFlag | int = 0) -> None:
+        """
+        Cancel active session-based operations.
+
+        Requires a PKCS#11 v3.0+ interface.
+        """
+        raise NotImplementedError()
+
+    def get_validation_flags(
+        self,
+        type: SessionValidationFlagsType | int = SessionValidationFlagsType.LAST_VALIDATION_OK,
+    ) -> int:
+        """
+        Return session validation flags for the selected validation state.
+
+        Requires a PKCS#11 v3.2 interface.
+        """
+        raise NotImplementedError()
+
+    def async_complete(
+        self,
+        operation: str | bytes,
+        capture_result: bool = True,
+    ) -> AsyncResult | None:
+        """
+        Poll completion of an asynchronous PKCS#11 operation.
+
+        Requires a PKCS#11 v3.2 interface.
+        """
+        raise NotImplementedError()
+
+    def async_get_id(self, operation: str | bytes) -> int:
+        """
+        Return a persistent identifier for an asynchronous PKCS#11 operation.
+
+        Requires a PKCS#11 v3.2 interface.
+        """
+        raise NotImplementedError()
+
+    def async_join(
+        self,
+        operation: str | bytes,
+        operation_id: int,
+        data: bytearray | None = None,
+    ) -> None:
+        """
+        Reconnect this session to a persisted asynchronous PKCS#11 operation.
+
+        Requires a PKCS#11 v3.2 interface.
+        """
+        raise NotImplementedError()
+
+    def message_encrypt_init(
+        self,
+        key: Key,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+    ) -> None:
+        """Initialize a PKCS#11 message-encrypt operation (v3.0+)."""
+        raise NotImplementedError()
+
+    def encrypt_message(
+        self,
+        data: str | bytes,
+        parameter: bytes | GCMMessageParams | CCMMessageParams | None = None,
+        associated_data: bytes | None = None,
+    ) -> bytes:
+        """Encrypt a single message with the active message-encrypt operation."""
+        raise NotImplementedError()
+
+    def encrypt_message_begin(
+        self,
+        parameter: bytes | GCMMessageParams | CCMMessageParams | None = None,
+        associated_data: bytes | None = None,
+    ) -> None:
+        """Begin a multi-part message-encrypt operation."""
+        raise NotImplementedError()
+
+    def encrypt_message_next(
+        self,
+        data: str | bytes,
+        parameter: bytes | GCMMessageParams | CCMMessageParams | None = None,
+        flags: MessageFlag | int = 0,
+    ) -> bytes:
+        """Encrypt the next chunk in a multi-part message-encrypt operation."""
+        raise NotImplementedError()
+
+    def message_encrypt_final(self) -> None:
+        """Finalize a multi-part message-encrypt operation."""
+        raise NotImplementedError()
+
+    def message_decrypt_init(
+        self,
+        key: Key,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+    ) -> None:
+        """Initialize a PKCS#11 message-decrypt operation (v3.0+)."""
+        raise NotImplementedError()
+
+    def decrypt_message(
+        self,
+        data: bytes,
+        parameter: bytes | GCMMessageParams | CCMMessageParams | None = None,
+        associated_data: bytes | None = None,
+    ) -> bytes:
+        """Decrypt a single message with the active message-decrypt operation."""
+        raise NotImplementedError()
+
+    def decrypt_message_begin(
+        self,
+        parameter: bytes | GCMMessageParams | CCMMessageParams | None = None,
+        associated_data: bytes | None = None,
+    ) -> None:
+        """Begin a multi-part message-decrypt operation."""
+        raise NotImplementedError()
+
+    def decrypt_message_next(
+        self,
+        data: bytes,
+        parameter: bytes | GCMMessageParams | CCMMessageParams | None = None,
+        flags: MessageFlag | int = 0,
+    ) -> bytes:
+        """Decrypt the next chunk in a multi-part message-decrypt operation."""
+        raise NotImplementedError()
+
+    def message_decrypt_final(self) -> None:
+        """Finalize a multi-part message-decrypt operation."""
+        raise NotImplementedError()
+
+    def message_sign_init(
+        self,
+        key: Key,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+    ) -> None:
+        """Initialize a PKCS#11 message-sign operation (v3.0+)."""
+        raise NotImplementedError()
+
+    def sign_message(
+        self,
+        data: str | bytes,
+        parameter: bytes | None = None,
+    ) -> bytes:
+        """Sign a single message with the active message-sign operation."""
+        raise NotImplementedError()
+
+    def sign_message_begin(self, parameter: bytes | None = None) -> None:
+        """Begin a multi-part message-sign operation."""
+        raise NotImplementedError()
+
+    def sign_message_next(
+        self,
+        data: str | bytes,
+        parameter: bytes | None = None,
+    ) -> bytes:
+        """Sign the next chunk in a multi-part message-sign operation."""
+        raise NotImplementedError()
+
+    def message_sign_final(self) -> None:
+        """Finalize a multi-part message-sign operation."""
+        raise NotImplementedError()
+
+    def message_verify_init(
+        self,
+        key: Key,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+    ) -> None:
+        """Initialize a PKCS#11 message-verify operation (v3.0+)."""
+        raise NotImplementedError()
+
+    def verify_message(
+        self,
+        data: str | bytes,
+        signature: bytes,
+        parameter: bytes | None = None,
+    ) -> None:
+        """Verify a single message with the active message-verify operation."""
+        raise NotImplementedError()
+
+    def verify_message_begin(self, parameter: bytes | None = None) -> None:
+        """Begin a multi-part message-verify operation."""
+        raise NotImplementedError()
+
+    def verify_message_next(
+        self,
+        data: str | bytes,
+        signature: bytes,
+        parameter: bytes | None = None,
+    ) -> None:
+        """Verify the next chunk in a multi-part message-verify operation."""
+        raise NotImplementedError()
+
+    def message_verify_final(self) -> None:
+        """Finalize a multi-part message-verify operation."""
+        raise NotImplementedError()
+
+    def verify_signature_init(
+        self,
+        key: Key,
+        signature: bytes,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes | tuple[Any, ...] | None = None,
+    ) -> None:
+        """Initialize a stateless verify-signature operation (v3.2)."""
+        raise NotImplementedError()
+
+    def verify_signature(self, data: str | bytes) -> None:
+        """Verify a complete payload with the active stateless verify-signature operation."""
+        raise NotImplementedError()
+
+    def verify_signature_update(self, data: str | bytes) -> None:
+        """Feed the next chunk into a stateless verify-signature operation."""
+        raise NotImplementedError()
+
+    def verify_signature_final(self) -> None:
+        """Finalize a stateless verify-signature operation."""
         raise NotImplementedError()
 
     def get_key(
@@ -1219,7 +1506,7 @@ class WrapMixin(HasKeyType):
         self,
         key: Key,
         mechanism: Mechanism | None = None,
-        mechanism_param: bytes | None = None,
+        mechanism_param: bytes | GCMWrapParams | CCMWrapParams | tuple[Any, ...] | None = None,
     ) -> bytes:
         """
         Use this key to wrap (i.e. encrypt) `key` for export. Returns
@@ -1232,6 +1519,28 @@ class WrapMixin(HasKeyType):
         :param bytes mechanism_param: mechanism parameter (if required)
 
         :rtype: bytes
+        """
+        raise NotImplementedError()
+
+    def wrap_key_authenticated(
+        self,
+        key: Key,
+        associated_data: bytes | None = None,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes
+        | GCMMessageParams
+        | CCMMessageParams
+        | tuple[Any, ...]
+        | None = None,
+    ) -> tuple[bytes, bytes | None]:
+        """
+        Wrap `key` with an authenticated wrapping mechanism.
+
+        Returns ``(wrapped_key, tag_or_mac)``. If a generated IV/nonce is used,
+        it is written back into ``mechanism_param`` when a typed helper object
+        such as :class:`pkcs11.mechanisms.GCMMessageParams` is supplied.
+
+        Requires a PKCS#11 v3.2 interface.
         """
         raise NotImplementedError()
 
@@ -1249,7 +1558,7 @@ class UnwrapMixin(HasKeyType):
         id: bytes | None = None,
         label: str | None = None,
         mechanism: Mechanism | None = None,
-        mechanism_param: bytes | None = None,
+        mechanism_param: bytes | GCMWrapParams | CCMWrapParams | tuple[Any, ...] | None = None,
         store: bool = False,
         capabilities: MechanismFlag | None = None,
         template: dict[Attribute, Any] | None = None,
@@ -1274,6 +1583,32 @@ class UnwrapMixin(HasKeyType):
         """
         raise NotImplementedError()
 
+    def unwrap_key_authenticated(
+        self,
+        object_class: ObjectClass,
+        key_type: KeyType,
+        key_data: bytes,
+        tag: bytes,
+        associated_data: bytes | None = None,
+        id: bytes | None = None,
+        label: str | None = None,
+        mechanism: Mechanism | None = None,
+        mechanism_param: bytes
+        | GCMMessageParams
+        | CCMMessageParams
+        | tuple[Any, ...]
+        | None = None,
+        store: bool = False,
+        capabilities: MechanismFlag | None = None,
+        template: dict[Attribute, Any] | None = None,
+    ) -> Key:
+        """
+        Unwrap `key_data` using an authenticated wrapping mechanism and `tag`.
+
+        Requires a PKCS#11 v3.2 interface.
+        """
+        raise NotImplementedError()
+
 
 class DeriveMixin(HasKeyType):
     """
@@ -1289,7 +1624,7 @@ class DeriveMixin(HasKeyType):
         store: bool = False,
         capabilities: MechanismFlag | None = None,
         mechanism: Mechanism | None = None,
-        mechanism_param: bytes | tuple[Any, ...] | None = None,
+        mechanism_param: bytes | SP800108KDFParams | SP800108FeedbackKDFParams | tuple[Any, ...] | None = None,
         template: dict[Attribute, Any] | None = None,
     ) -> SecretKey:
         """

@@ -12,13 +12,14 @@ Classes
     :members:
     :exclude-members: lib
 
-    .. class:: lib(so)
+    .. class:: lib(so, interface="auto")
 
         Initialises the PKCS#11 library.
 
-        Only one PKCS#11 library can be initialised.
-
         :param str so: Path to the PKCS#11 library to initialise.
+        :param str interface:
+            Requested PKCS#11 interface version. Supported values are
+            ``"auto"``, ``"2.40"``, ``"3.0"``, ``"3.1"``, and ``"3.2"``.
         
         .. method:: get_slots(token_present=False)
 
@@ -105,6 +106,12 @@ Classes
     .. autoclass:: Session()
         :members:
         :inherited-members:
+
+        This fork includes PKCS#11 3.x session APIs such as
+        ``login(username=...)``, ``cancel()``, ``get_validation_flags()``,
+        ``async_complete()``, ``async_get_id()``, ``async_join()``, and the
+        ``message_*`` operation family when the loaded module supports the
+        relevant interface version.
 
 
     Token Objects

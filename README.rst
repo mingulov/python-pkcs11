@@ -322,7 +322,9 @@ PKCS#11 versions:
 * 2.11
 * 2.20
 * 2.40
+* 3.0
 * 3.1
+* 3.2
 
 Feel free to send pull requests for any functionality that's not exposed. The
 code is designed to be readable and expose the PKCS #11 spec in a
@@ -333,9 +335,19 @@ If you want your device supported, get in touch!
 More info on PKCS #11
 ---------------------
 
-The latest version of the PKCS #11 spec is available from OASIS:
+Published PKCS #11 specifications are available from OASIS:
 
-http://docs.oasis-open.org/pkcs11/pkcs11-base/v2.40/pkcs11-base-v2.40.html
+https://docs.oasis-open.org/pkcs11/
+
+This fork also supports interface negotiation via ``pkcs11.lib(path, interface=...)``
+for ``"auto"``, ``"2.40"``, ``"3.0"``, ``"3.1"``, and ``"3.2"`` when the
+underlying module exports ``C_GetInterface``.
+
+The high-level wrapper also exposes a PKCS#11 3.x-oriented testing surface,
+including ``C_LoginUser``, ``C_SessionCancel``, session validation flags,
+message-based encrypt/decrypt/sign/verify operations, stateless
+``C_VerifySignature*`` verification, authenticated wrap/unwrap, and
+PKCS#11 3.2 asynchronous session management helpers.
 
 You should also consult the documentation for your PKCS #11 implementation.
 Many implementations expose additional vendor options configurable in your
