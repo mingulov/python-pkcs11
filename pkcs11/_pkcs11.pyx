@@ -224,7 +224,11 @@ cdef class MechanismWithParam:
                            Mechanism.SHA224_RSA_PKCS_PSS,
                            Mechanism.SHA256_RSA_PKCS_PSS,
                            Mechanism.SHA384_RSA_PKCS_PSS,
-                           Mechanism.SHA512_RSA_PKCS_PSS):
+                           Mechanism.SHA512_RSA_PKCS_PSS,
+                           Mechanism.SHA3_224_RSA_PKCS_PSS,
+                           Mechanism.SHA3_256_RSA_PKCS_PSS,
+                           Mechanism.SHA3_384_RSA_PKCS_PSS,
+                           Mechanism.SHA3_512_RSA_PKCS_PSS):
             paramlen = sizeof(CK_RSA_PKCS_PSS_PARAMS)
             self.param = pss_params = \
                 <CK_RSA_PKCS_PSS_PARAMS *> PyMem_Malloc(paramlen)
