@@ -187,6 +187,8 @@ class Attribute(IntEnum):
     """Key supports KEM decapsulation (PKCS#11 v3.2, :class:`bool`)."""
     PARAMETER_SET = 0x0000061D
     """PQC algorithm parameter set (e.g. ML-KEM-512/768/1024, PKCS#11 v3.2, :class:`int`)."""
+    PROFILE_ID = 0x00000601
+    """Profile identifier on a CKO_PROFILE object (PKCS#11 v3.0, :class:`int`)."""
     START_DATE = 0x00000110
     """Start date for the object's validity (:class:`datetime.date`)."""
     END_DATE = 0x00000111
@@ -615,3 +617,25 @@ class SlhDsaParameterSet(IntEnum):
     SHA2_256F = 0x0000000B
     SHAKE_256F = 0x0000000C
     """SLH-DSA-SHAKE-256f — fast, security category 5."""
+
+
+@unique
+class ProfileID(IntEnum):
+    """
+    PKCS#11 v3.0 profile identifiers (CKP_*).
+
+    Used as the value of ``CKA_PROFILE_ID`` (``Attribute.PROFILE_ID``) on
+    ``CKO_PROFILE`` (``ObjectClass.PROFILE``) objects.  Enumerate these objects
+    via :meth:`pkcs11.Session.get_objects` with ``{Attribute.CLASS: ObjectClass.PROFILE}``.
+    """
+
+    BASELINE_PROVIDER = 0x00000001
+    """Baseline Provider profile — minimum conformance."""
+    EXTENDED_PROVIDER = 0x00000002
+    """Extended Provider profile — full PKCS#11 conformance."""
+    AUTHENTICATION_TOKEN = 0x00000003
+    """Authentication Token profile."""
+    PUBLIC_CERTIFICATES_TOKEN = 0x00000004
+    """Public Certificates Token profile."""
+    VENDOR_DEFINED = 0x80000000
+    """Vendor-defined profile base."""
