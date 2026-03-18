@@ -1495,11 +1495,11 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
     elif rv == CKR_ARGUMENTS_BAD:
         exc = ArgumentsBad()
     elif rv == CKR_BUFFER_TOO_SMALL:
-        exc = PKCS11Error("Buffer was too small. Should never see this.")
+        exc = BufferTooSmall()
     elif rv == CKR_CRYPTOKI_ALREADY_INITIALIZED:
-        exc = PKCS11Error("Initialisation error (already initialized). Should never see this.")
+        exc = CryptokiAlreadyInitialized()
     elif rv == CKR_CRYPTOKI_NOT_INITIALIZED:
-        exc = PKCS11Error("Initialisation error (not initialized). Should never see this.")
+        exc = CryptokiNotInitialized()
     elif rv == CKR_DATA_INVALID:
         exc = DataInvalid()
     elif rv == CKR_DATA_LEN_RANGE:
@@ -1589,7 +1589,7 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
     elif rv == CKR_SESSION_HANDLE_INVALID:
         exc = SessionHandleInvalid()
     elif rv == CKR_SESSION_PARALLEL_NOT_SUPPORTED:
-        exc = PKCS11Error("Parallel not supported. Should never see this.")
+        exc = ParallelNotSupported()
     elif rv == CKR_SESSION_READ_ONLY:
         exc = SessionReadOnly()
     elif rv == CKR_SESSION_READ_ONLY_EXISTS:
@@ -1653,7 +1653,7 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
     elif rv == CKR_OPERATION_NOT_VALIDATED:
         exc = OperationNotValidated()
     elif rv == CKR_TOKEN_NOT_INITIALIZED:
-        exc = PKCS11Error("Token not initialized")
+        exc = TokenNotInitialized()
     elif rv == CKR_PARAMETER_SET_NOT_SUPPORTED:
         exc = ParameterSetNotSupported()
     else:

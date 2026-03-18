@@ -48,6 +48,31 @@ class ArgumentsBad(PKCS11Error):
     """
 
 
+class BufferTooSmall(PKCS11Error):
+    """CKR_BUFFER_TOO_SMALL — output buffer is too small for the result."""
+    pass
+
+
+class CryptokiAlreadyInitialized(PKCS11Error):
+    """CKR_CRYPTOKI_ALREADY_INITIALIZED — C_Initialize called when already initialized."""
+    pass
+
+
+class CryptokiNotInitialized(PKCS11Error):
+    """CKR_CRYPTOKI_NOT_INITIALIZED — PKCS#11 library not initialized (C_Initialize not called)."""
+    pass
+
+
+class ParallelNotSupported(PKCS11Error):
+    """CKR_CANT_LOCK — module does not support parallel/multi-threaded access."""
+    pass
+
+
+class TokenNotInitialized(PKCS11Error):
+    """CKR_TOKEN_NOT_RECOGNIZED — token not initialized or not recognized."""
+    pass
+
+
 class DataInvalid(PKCS11Error):
     """
     The plaintext input data to a cryptographic operation is invalid.
