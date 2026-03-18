@@ -2726,6 +2726,47 @@ cdef class Session(HasFuncList, types.Session):
 
         return bytes(random)
 
+    def get_operation_state(self):
+        """Get the current operation state (C_GetOperationState).
+
+        Returns the operation state as bytes, or raises an error if
+        no operation is active or the module doesn't support it.
+        """
+        cdef CK_SESSION_HANDLE handle = self.handle
+        cdef CK_ULONG length = 0
+        cdef CK_RV retval
+
+        # First call to get required length
+        with nogil:
+            retval = self.funclist.C_GetOperationState(handle, NULL, &length)
+        assertRV(retval)
+
+        cdef CK_BYTE [:] state = CK_BYTE_buffer(length)
+        with nogil:
+            retval = self.funclist.C_GetOperationState(handle, &state[0], &length)
+        assertRV(retval)
+
+        return bytes(state[:length])
+
+    def set_operation_state(self, state, encryption_key=0, authentication_key=0):
+        """Restore a previously saved operation state (C_SetOperationState).
+
+        :param bytes state: Operation state from get_operation_state()
+        :param int encryption_key: Handle of encryption key (0 if none)
+        :param int authentication_key: Handle of authentication key (0 if none)
+        """
+        cdef CK_SESSION_HANDLE handle = self.handle
+        cdef CK_BYTE *state_ptr = state
+        cdef CK_ULONG state_len = <CK_ULONG> len(state)
+        cdef CK_OBJECT_HANDLE enc_key = <CK_OBJECT_HANDLE> encryption_key
+        cdef CK_OBJECT_HANDLE auth_key = <CK_OBJECT_HANDLE> authentication_key
+        cdef CK_RV retval
+
+        with nogil:
+            retval = self.funclist.C_SetOperationState(
+                handle, state_ptr, state_len, enc_key, auth_key)
+        assertRV(retval)
+
     def __digest_operation(self, mechanism, mechanism_param):
         mech = MechanismWithParam(
             None, {},
