@@ -390,6 +390,12 @@ class UserNotLoggedIn(PKCS11Error):
     pass
 
 
+class UserTypeInvalid(PKCS11Error):
+    """CKR_USER_TYPE_INVALID — some modules (e.g. NSS) return this instead of
+    CKR_USER_ALREADY_LOGGED_IN when login is attempted while already logged in."""
+    pass
+
+
 class UserPinNotInitialized(PKCS11Error):
     pass
 

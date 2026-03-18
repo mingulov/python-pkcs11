@@ -1633,7 +1633,7 @@ cdef inline object map_rv_to_error(CK_RV rv):  # pragma: nocover
     elif rv == CKR_USER_TOO_MANY_TYPES:
         exc = UserTooManyTypes()
     elif rv == CKR_USER_TYPE_INVALID:
-        exc = PKCS11Error("User type invalid. Should never see this.")
+        exc = UserTypeInvalid()
     elif rv == CKR_WRAPPED_KEY_INVALID:
         exc = WrappedKeyInvalid()
     elif rv == CKR_WRAPPED_KEY_LEN_RANGE:
