@@ -2903,6 +2903,18 @@ cdef class ObjectHandleWrapper(HasFuncList):
             retval = self.session.funclist.C_DestroyObject(handle, obj)
         assertRV(retval)
 
+    def get_size(self):
+        """Return approximate size of the object in bytes (C_GetObjectSize)."""
+        cdef CK_SESSION_HANDLE handle = self.session.handle
+        cdef CK_OBJECT_HANDLE obj = self.handle
+        cdef CK_ULONG size = 0
+        cdef CK_RV retval
+
+        with nogil:
+            retval = self.session.funclist.C_GetObjectSize(handle, obj, &size)
+        assertRV(retval)
+        return size
+
     def copy(self, attrs):
         template = self.session.make_attribute_list(attrs)
 
