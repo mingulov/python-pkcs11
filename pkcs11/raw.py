@@ -294,6 +294,22 @@ _FP_TYPES_V30 = {
     91: ("C_MessageVerifyFinal", _FP(CK_RV, CK_SESSION_HANDLE)),
 }
 
+# v3.2 additional function pointer types (indices 92+ in CK_FUNCTION_LIST_3_2)
+_FP_TYPES_V32 = {
+    92: ("C_EncapsulateKey", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE, CK_VOID_PTR, CK_ULONG, POINTER(CK_OBJECT_HANDLE), CK_BYTE_PTR, CK_ULONG_PTR)),
+    93: ("C_DecapsulateKey", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, POINTER(CK_OBJECT_HANDLE))),
+    94: ("C_VerifySignatureInit", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG)),
+    95: ("C_VerifySignature", _FP(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG)),
+    96: ("C_VerifySignatureUpdate", _FP(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG)),
+    97: ("C_VerifySignatureFinal", _FP(CK_RV, CK_SESSION_HANDLE)),
+    98: ("C_GetSessionValidationFlags", _FP(CK_RV, CK_SESSION_HANDLE, CK_ULONG, CK_ULONG_PTR)),
+    99: ("C_AsyncComplete", _FP(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR)),
+    100: ("C_AsyncGetID", _FP(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR)),
+    101: ("C_AsyncJoin", _FP(CK_RV, CK_SESSION_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR)),
+    102: ("C_WrapKeyAuthenticated", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG_PTR)),
+    103: ("C_UnwrapKeyAuthenticated", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE, CK_OBJECT_HANDLE, CK_BYTE_PTR, CK_ULONG, CK_VOID_PTR, CK_ULONG, POINTER(CK_OBJECT_HANDLE))),
+}
+
 _PTR_SIZE = ctypes.sizeof(c_void_p)
 # CK_FUNCTION_LIST starts with CK_VERSION (2 bytes) padded to pointer alignment
 _VERSION_SIZE = _PTR_SIZE  # CK_VERSION padded to pointer boundary
@@ -356,11 +372,13 @@ class RawPKCS11:
                 self._funcs[name] = fp_type(addr)
 
     def _load_v32_from_ptr(self, ptr: int) -> None:
-        """Extract v3.2+ function pointers (KEM etc) — uses same layout as v3.0."""
-        # v3.2 extends v3.0 with additional functions at higher indices
-        # For now, the v3.0 functions at indices 68-91 are the same
-        # Additional v3.2 functions would be at 92+
-        pass  # KEM functions already in v2.40 funclist for Kryoptic
+        """Extract v3.2 function pointers (KEM, VerifySignature, Async, WrapAuth)."""
+        for idx, (name, fp_type) in _FP_TYPES_V32.items():
+            offset = _VERSION_SIZE + (idx * _PTR_SIZE)
+            addr_ptr = cast(ptr + offset, POINTER(c_void_p))
+            addr = addr_ptr.contents.value
+            if addr:
+                self._funcs[name] = fp_type(addr)
 
     def _load_from_lib(self, lib_path: str) -> None:
         """Load module via CDLL and C_GetFunctionList."""
@@ -644,3 +662,41 @@ class RawPKCS11:
 
     def C_MessageVerifyFinal(self, hSession: int) -> int:
         return self._call("C_MessageVerifyFinal", hSession)
+
+    # --- v3.2 functions (from CK_FUNCTION_LIST_3_2, indices 92+) ---
+
+    def C_EncapsulateKey(self, hSession: int, pMechanism: Any, hKey: int, pTemplate: Any, ulCount: int, phKey: Any, pCiphertext: Any, pulCiphertextLen: Any) -> int:
+        return self._call("C_EncapsulateKey", hSession, pMechanism, hKey, pTemplate, ulCount, phKey, pCiphertext, pulCiphertextLen)
+
+    def C_DecapsulateKey(self, hSession: int, pMechanism: Any, hKey: int, pTemplate: Any, ulCount: int, pCiphertext: Any, ulCiphertextLen: int, phKey: Any) -> int:
+        return self._call("C_DecapsulateKey", hSession, pMechanism, hKey, pTemplate, ulCount, pCiphertext, ulCiphertextLen, phKey)
+
+    def C_VerifySignatureInit(self, hSession: int, pMechanism: Any, hKey: int, pSignature: Any, ulSignatureLen: int) -> int:
+        return self._call("C_VerifySignatureInit", hSession, pMechanism, hKey, pSignature, ulSignatureLen)
+
+    def C_VerifySignature(self, hSession: int, pData: Any, ulDataLen: int) -> int:
+        return self._call("C_VerifySignature", hSession, pData, ulDataLen)
+
+    def C_VerifySignatureUpdate(self, hSession: int, pData: Any, ulDataLen: int) -> int:
+        return self._call("C_VerifySignatureUpdate", hSession, pData, ulDataLen)
+
+    def C_VerifySignatureFinal(self, hSession: int) -> int:
+        return self._call("C_VerifySignatureFinal", hSession)
+
+    def C_GetSessionValidationFlags(self, hSession: int, ulFlags: int, pulFlags: Any) -> int:
+        return self._call("C_GetSessionValidationFlags", hSession, ulFlags, pulFlags)
+
+    def C_AsyncComplete(self, hSession: int, pFunctionName: Any, ulFunctionNameLen: int, pOutput: Any, pulOutputLen: Any) -> int:
+        return self._call("C_AsyncComplete", hSession, pFunctionName, ulFunctionNameLen, pOutput, pulOutputLen)
+
+    def C_AsyncGetID(self, hSession: int, pID: Any, pulIDLen: Any) -> int:
+        return self._call("C_AsyncGetID", hSession, pID, pulIDLen)
+
+    def C_AsyncJoin(self, hSession: int, pID: Any, ulIDLen: int, pOutput: Any, pulOutputLen: Any) -> int:
+        return self._call("C_AsyncJoin", hSession, pID, ulIDLen, pOutput, pulOutputLen)
+
+    def C_WrapKeyAuthenticated(self, hSession: int, pMechanism: Any, hWrappingKey: int, hKey: int, hAADKey: int, pWrappedKey: Any, pulWrappedKeyLen: Any) -> int:
+        return self._call("C_WrapKeyAuthenticated", hSession, pMechanism, hWrappingKey, hKey, hAADKey, pWrappedKey, pulWrappedKeyLen)
+
+    def C_UnwrapKeyAuthenticated(self, hSession: int, pMechanism: Any, hUnwrappingKey: int, hAADKey: int, pWrappedKey: Any, ulWrappedKeyLen: int, pTemplate: Any, ulCount: int, phKey: Any) -> int:
+        return self._call("C_UnwrapKeyAuthenticated", hSession, pMechanism, hUnwrappingKey, hAADKey, pWrappedKey, ulWrappedKeyLen, pTemplate, ulCount, phKey)
