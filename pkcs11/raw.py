@@ -265,6 +265,34 @@ _FP_TYPES = {
     67: ("C_WaitForSlotEvent", _FP(CK_RV, CK_FLAGS, POINTER(CK_SLOT_ID), CK_VOID_PTR)),
 }
 
+# v3.0 additional function pointer types (indices 68+ in CK_FUNCTION_LIST_3_0)
+_FP_TYPES_V30 = {
+    68: ("C_GetInterfaceList", _FP(CK_RV, CK_VOID_PTR, CK_ULONG_PTR)),
+    69: ("C_GetInterface", _FP(CK_RV, CK_BYTE_PTR, CK_VOID_PTR, CK_VOID_PTR, CK_FLAGS)),
+    70: ("C_LoginUser", _FP(CK_RV, CK_SESSION_HANDLE, CK_USER_TYPE, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG)),
+    71: ("C_SessionCancel", _FP(CK_RV, CK_SESSION_HANDLE, CK_FLAGS)),
+    72: ("C_MessageEncryptInit", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE)),
+    73: ("C_EncryptMessage", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR)),
+    74: ("C_EncryptMessageBegin", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG)),
+    75: ("C_EncryptMessageNext", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR, CK_FLAGS)),
+    76: ("C_MessageEncryptFinal", _FP(CK_RV, CK_SESSION_HANDLE)),
+    77: ("C_MessageDecryptInit", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE)),
+    78: ("C_DecryptMessage", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR)),
+    79: ("C_DecryptMessageBegin", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG)),
+    80: ("C_DecryptMessageNext", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR, CK_FLAGS)),
+    81: ("C_MessageDecryptFinal", _FP(CK_RV, CK_SESSION_HANDLE)),
+    82: ("C_MessageSignInit", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE)),
+    83: ("C_SignMessage", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR)),
+    84: ("C_SignMessageBegin", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG)),
+    85: ("C_SignMessageNext", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG_PTR)),
+    86: ("C_MessageSignFinal", _FP(CK_RV, CK_SESSION_HANDLE)),
+    87: ("C_MessageVerifyInit", _FP(CK_RV, CK_SESSION_HANDLE, POINTER(CK_MECHANISM), CK_OBJECT_HANDLE)),
+    88: ("C_VerifyMessage", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG)),
+    89: ("C_VerifyMessageBegin", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG)),
+    90: ("C_VerifyMessageNext", _FP(CK_RV, CK_SESSION_HANDLE, CK_VOID_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG, CK_BYTE_PTR, CK_ULONG)),
+    91: ("C_MessageVerifyFinal", _FP(CK_RV, CK_SESSION_HANDLE)),
+}
+
 _PTR_SIZE = ctypes.sizeof(c_void_p)
 # CK_FUNCTION_LIST starts with CK_VERSION (2 bytes) padded to pointer alignment
 _VERSION_SIZE = _PTR_SIZE  # CK_VERSION padded to pointer boundary
@@ -301,6 +329,13 @@ class RawPKCS11:
         else:
             raise ValueError("Provide funclist_ptr or lib_path")
 
+        # Load v3.0+ functions if pointer available
+        if funclist3_ptr:
+            self._load_v30_from_ptr(funclist3_ptr)
+        # Load v3.2+ functions if pointer available
+        if funclist32_ptr:
+            self._load_v32_from_ptr(funclist32_ptr)
+
     def _load_from_ptr(self, ptr: int) -> None:
         """Extract function pointers from CK_FUNCTION_LIST at ptr."""
         for idx, (name, fp_type) in _FP_TYPES.items():
@@ -309,6 +344,22 @@ class RawPKCS11:
             addr = addr_ptr.contents.value
             if addr:
                 self._funcs[name] = fp_type(addr)
+
+    def _load_v30_from_ptr(self, ptr: int) -> None:
+        """Extract v3.0+ function pointers from CK_FUNCTION_LIST_3_0."""
+        for idx, (name, fp_type) in _FP_TYPES_V30.items():
+            offset = _VERSION_SIZE + (idx * _PTR_SIZE)
+            addr_ptr = cast(ptr + offset, POINTER(c_void_p))
+            addr = addr_ptr.contents.value
+            if addr:
+                self._funcs[name] = fp_type(addr)
+
+    def _load_v32_from_ptr(self, ptr: int) -> None:
+        """Extract v3.2+ function pointers (KEM etc) — uses same layout as v3.0."""
+        # v3.2 extends v3.0 with additional functions at higher indices
+        # For now, the v3.0 functions at indices 68-91 are the same
+        # Additional v3.2 functions would be at 92+
+        pass  # KEM functions already in v2.40 funclist for Kryoptic
 
     def _load_from_lib(self, lib_path: str) -> None:
         """Load module via CDLL and C_GetFunctionList."""
