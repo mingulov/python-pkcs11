@@ -109,6 +109,15 @@ cdef inline void _zero_attribute_array(CK_ATTRIBUTE *data, CK_ULONG count):
         memset(data, 0, count * sizeof(CK_ATTRIBUTE))
 
 
+cdef inline bint _rv_allows_attribute_template_processing(CK_RV rv):
+    return (
+        rv == CKR_OK
+        or rv == CKR_ATTRIBUTE_SENSITIVE
+        or rv == CKR_ATTRIBUTE_TYPE_INVALID
+        or rv == CKR_BUFFER_TOO_SMALL
+    )
+
+
 cdef inline CK_OBJECT_HANDLE _coerce_object_handle(object value):
     if hasattr(value, "handle"):
         return <CK_OBJECT_HANDLE> value.handle
@@ -2862,6 +2871,15 @@ cdef class ObjectHandleWrapper(HasFuncList):
         with nogil:
             retval = self.funclist.C_GetAttributeValue(handle, obj, tpl, total)
 
+        # Per the spec, only CKR_ATTRIBUTE_SENSITIVE, CKR_ATTRIBUTE_TYPE_INVALID,
+        # and CKR_BUFFER_TOO_SMALL are "non-true errors" for C_GetAttributeValue
+        # that still guarantee all template entries were processed. For hard
+        # failures like CKR_OBJECT_HANDLE_INVALID, ulValueLen contents are not
+        # safe to inspect.
+        if not _rv_allows_attribute_template_processing(retval):
+            PyMem_Free(tpl)
+            assertRV(retval)
+
         for ix in range(total):
             if tpl[ix].ulValueLen != CK_UNAVAILABLE_INFORMATION:
                 # overwrite the template at position 'retrievable' in the buffer
@@ -4085,6 +4103,47 @@ cdef class lib(HasFuncList):
         One of ``"2.40"``, ``"3.0"``, ``"3.1"``, or ``"3.2"``.
         """
         return self._interface_version
+
+    @property
+    def _raw_lib_path(self):
+        """Path to the loaded PKCS#11 shared library (str).
+
+        Internal property for advanced/testing use. Allows ctypes-based
+        raw C_* calls that bypass the wrapper's safety checks.
+        """
+        return self.so
+
+    @property
+    def _raw_funclist_ptr(self):
+        """CK_FUNCTION_LIST (v2.40) pointer as integer (for ctypes).
+
+        Internal property for advanced/testing use. Use with ctypes to
+        call C_* functions at known offsets in the function list.
+        Returns 0 if function list is not available.
+        """
+        if self.funclist == NULL:
+            return 0
+        return <unsigned long long>self.funclist
+
+    @property
+    def _raw_funclist3_ptr(self):
+        """CK_FUNCTION_LIST_3_0 pointer as integer (for ctypes).
+
+        Returns 0 if module is v2.40 only (no v3.0 interface).
+        """
+        if self.funclist3 == NULL:
+            return 0
+        return <unsigned long long>self.funclist3
+
+    @property
+    def _raw_funclist32_ptr(self):
+        """CK_FUNCTION_LIST_3_2 pointer as integer (for ctypes).
+
+        Returns 0 if module does not support v3.2 (no KEM functions).
+        """
+        if self.funclist32 == NULL:
+            return 0
+        return <unsigned long long>self.funclist32
 
     def get_interface_list(self):
         """Return list of supported interface ``(name, major, minor)`` tuples.
