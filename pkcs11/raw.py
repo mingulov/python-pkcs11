@@ -570,3 +570,77 @@ class RawPKCS11:
 
     def C_GenerateKeyPair(self, hSession: int, pMech: Any, pPubTemplate: Any, ulPubCount: int, pPrivTemplate: Any, ulPrivCount: int, phPubKey: Any, phPrivKey: Any) -> int:
         return self._call("C_GenerateKeyPair", hSession, pMech, pPubTemplate, ulPubCount, pPrivTemplate, ulPrivCount, phPubKey, phPrivKey)
+
+    # --- v3.0 functions (from CK_FUNCTION_LIST_3_0, indices 68+) ---
+
+    def C_GetInterfaceList(self, pInterfaceList: Any, pulCount: Any) -> int:
+        return self._call("C_GetInterfaceList", pInterfaceList, pulCount)
+
+    def C_GetInterface(self, pInterfaceName: Any, pVersion: Any, ppFunctionList: Any, flags: int) -> int:
+        return self._call("C_GetInterface", pInterfaceName, pVersion, ppFunctionList, flags)
+
+    def C_LoginUser(self, hSession: int, userType: int, pPin: Any, ulPinLen: int, pUsername: Any, ulUsernameLen: int) -> int:
+        return self._call("C_LoginUser", hSession, userType, pPin, ulPinLen, pUsername, ulUsernameLen)
+
+    def C_SessionCancel(self, hSession: int, flags: int) -> int:
+        return self._call("C_SessionCancel", hSession, flags)
+
+    def C_MessageEncryptInit(self, hSession: int, pMechanism: Any, hKey: int) -> int:
+        return self._call("C_MessageEncryptInit", hSession, pMechanism, hKey)
+
+    def C_EncryptMessage(self, hSession: int, pParam: Any, ulParamLen: int, pAAD: Any, ulAADLen: int, pPlaintext: Any, ulPlaintextLen: int, pCiphertext: Any, pulCiphertextLen: Any) -> int:
+        return self._call("C_EncryptMessage", hSession, pParam, ulParamLen, pAAD, ulAADLen, pPlaintext, ulPlaintextLen, pCiphertext, pulCiphertextLen)
+
+    def C_EncryptMessageBegin(self, hSession: int, pParam: Any, ulParamLen: int, pAAD: Any, ulAADLen: int) -> int:
+        return self._call("C_EncryptMessageBegin", hSession, pParam, ulParamLen, pAAD, ulAADLen)
+
+    def C_EncryptMessageNext(self, hSession: int, pParam: Any, ulParamLen: int, pPlaintext: Any, ulPlaintextLen: int, pCiphertext: Any, pulCiphertextLen: Any, flags: int) -> int:
+        return self._call("C_EncryptMessageNext", hSession, pParam, ulParamLen, pPlaintext, ulPlaintextLen, pCiphertext, pulCiphertextLen, flags)
+
+    def C_MessageEncryptFinal(self, hSession: int) -> int:
+        return self._call("C_MessageEncryptFinal", hSession)
+
+    def C_MessageDecryptInit(self, hSession: int, pMechanism: Any, hKey: int) -> int:
+        return self._call("C_MessageDecryptInit", hSession, pMechanism, hKey)
+
+    def C_DecryptMessage(self, hSession: int, pParam: Any, ulParamLen: int, pAAD: Any, ulAADLen: int, pCiphertext: Any, ulCiphertextLen: int, pPlaintext: Any, pulPlaintextLen: Any) -> int:
+        return self._call("C_DecryptMessage", hSession, pParam, ulParamLen, pAAD, ulAADLen, pCiphertext, ulCiphertextLen, pPlaintext, pulPlaintextLen)
+
+    def C_DecryptMessageBegin(self, hSession: int, pParam: Any, ulParamLen: int, pAAD: Any, ulAADLen: int) -> int:
+        return self._call("C_DecryptMessageBegin", hSession, pParam, ulParamLen, pAAD, ulAADLen)
+
+    def C_DecryptMessageNext(self, hSession: int, pParam: Any, ulParamLen: int, pCiphertext: Any, ulCiphertextLen: int, pPlaintext: Any, pulPlaintextLen: Any, flags: int) -> int:
+        return self._call("C_DecryptMessageNext", hSession, pParam, ulParamLen, pCiphertext, ulCiphertextLen, pPlaintext, pulPlaintextLen, flags)
+
+    def C_MessageDecryptFinal(self, hSession: int) -> int:
+        return self._call("C_MessageDecryptFinal", hSession)
+
+    def C_MessageSignInit(self, hSession: int, pMechanism: Any, hKey: int) -> int:
+        return self._call("C_MessageSignInit", hSession, pMechanism, hKey)
+
+    def C_SignMessage(self, hSession: int, pParam: Any, ulParamLen: int, pData: Any, ulDataLen: int, pSignature: Any, pulSignatureLen: Any) -> int:
+        return self._call("C_SignMessage", hSession, pParam, ulParamLen, pData, ulDataLen, pSignature, pulSignatureLen)
+
+    def C_SignMessageBegin(self, hSession: int, pParam: Any, ulParamLen: int) -> int:
+        return self._call("C_SignMessageBegin", hSession, pParam, ulParamLen)
+
+    def C_SignMessageNext(self, hSession: int, pParam: Any, ulParamLen: int, pData: Any, ulDataLen: int, pSignature: Any, pulSignatureLen: Any) -> int:
+        return self._call("C_SignMessageNext", hSession, pParam, ulParamLen, pData, ulDataLen, pSignature, pulSignatureLen)
+
+    def C_MessageSignFinal(self, hSession: int) -> int:
+        return self._call("C_MessageSignFinal", hSession)
+
+    def C_MessageVerifyInit(self, hSession: int, pMechanism: Any, hKey: int) -> int:
+        return self._call("C_MessageVerifyInit", hSession, pMechanism, hKey)
+
+    def C_VerifyMessage(self, hSession: int, pParam: Any, ulParamLen: int, pData: Any, ulDataLen: int, pSignature: Any, ulSignatureLen: int) -> int:
+        return self._call("C_VerifyMessage", hSession, pParam, ulParamLen, pData, ulDataLen, pSignature, ulSignatureLen)
+
+    def C_VerifyMessageBegin(self, hSession: int, pParam: Any, ulParamLen: int) -> int:
+        return self._call("C_VerifyMessageBegin", hSession, pParam, ulParamLen)
+
+    def C_VerifyMessageNext(self, hSession: int, pParam: Any, ulParamLen: int, pData: Any, ulDataLen: int, pSignature: Any, ulSignatureLen: int) -> int:
+        return self._call("C_VerifyMessageNext", hSession, pParam, ulParamLen, pData, ulDataLen, pSignature, ulSignatureLen)
+
+    def C_MessageVerifyFinal(self, hSession: int) -> int:
+        return self._call("C_MessageVerifyFinal", hSession)
