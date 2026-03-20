@@ -381,8 +381,26 @@ class RawPKCS11:
                 self._funcs[name] = fp_type(addr)
 
     def _load_from_lib(self, lib_path: str) -> None:
-        """Load module via CDLL and C_GetFunctionList."""
+        """Load module via CDLL, auto-negotiating v3.0+ if available."""
         self._lib = ctypes.CDLL(lib_path)
+
+        # Try C_GetInterface first (v3.0+) for full function list
+        try:
+            get_iface = self._lib.C_GetInterface
+            get_iface.restype = CK_RV
+            get_iface.argtypes = [CK_BYTE_PTR, CK_VOID_PTR, POINTER(c_void_p), CK_FLAGS]
+            iface_ptr = c_void_p()
+            rv = get_iface(None, None, byref(iface_ptr), 0)
+            ptr_val = iface_ptr.value
+            if rv == CKR_OK and ptr_val is not None:
+                self._load_from_ptr(ptr_val)
+                self._load_v30_from_ptr(ptr_val)
+                self._load_v32_from_ptr(ptr_val)
+                return
+        except (AttributeError, OSError):
+            pass  # C_GetInterface not exported — fall back to v2.40
+
+        # Fall back to C_GetFunctionList (v2.40)
         get_fl = self._lib.C_GetFunctionList
         get_fl.restype = CK_RV
         get_fl.argtypes = [POINTER(c_void_p)]
@@ -390,11 +408,19 @@ class RawPKCS11:
         rv = get_fl(byref(fl_ptr))
         if rv != CKR_OK:
             raise RuntimeError(f"C_GetFunctionList failed: 0x{rv:08x}")
-        self._load_from_ptr(fl_ptr.value)
+        fl_val = fl_ptr.value
+        if fl_val is None:
+            raise RuntimeError("C_GetFunctionList returned NULL pointer")
+        self._load_from_ptr(fl_val)
 
     @classmethod
     def from_lib(cls, lib_path: str) -> "RawPKCS11":
-        """Create from library path (standalone mode)."""
+        """Create from library path (standalone mode).
+
+        Auto-negotiates: tries C_GetInterface (v3.0+) first for full
+        function list including message-based, KEM, and async operations.
+        Falls back to C_GetFunctionList (v2.40) if not available.
+        """
         return cls(lib_path=lib_path)
 
     def _call(self, name: str, *args: Any) -> int:
