@@ -52,10 +52,7 @@ class KeyType(IntEnum):
     GENERIC_SECRET = 0x00000010
     _RC2 = 0x00000011
     _RC4 = 0x00000012
-    DES = 0x00000013
-    """
-    .. warning:: Considered insecure. Use AES where possible.
-    """
+    _DES = 0x00000013
     DES2 = 0x00000014
     """
     .. warning:: Considered insecure. Use AES where possible.
