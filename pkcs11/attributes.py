@@ -122,6 +122,7 @@ ATTRIBUTE_TYPES: dict[Attribute, Handler] = {
     Attribute.HSS_LMOTS_TYPES: handle_ulong_array,
     Attribute.HSS_KEYS_REMAINING: handle_ulong,
     Attribute.PARAMETER_SET: handle_ulong,
+    Attribute.MECHANISM_TYPE: handle_ulong,
     Attribute.PROFILE_ID: handle_ulong,
     Attribute.OBJECT_VALIDATION_FLAGS: handle_ulong,
     Attribute.VALIDATION_TYPE: _enum(ValidationType),
