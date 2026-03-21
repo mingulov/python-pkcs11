@@ -4097,6 +4097,11 @@ cdef class lib(HasFuncList):
         """Raw CK_FUNCTION_LIST_3_0 pointer as int (for RawPKCS11 v3.0)."""
         return <uintptr_t> self.funclist3 if self.funclist3 != NULL else 0
 
+    @property
+    def _raw_funclist32_ptr(self):
+        """Raw CK_FUNCTION_LIST_3_2 pointer as int (for RawPKCS11 v3.2)."""
+        return <uintptr_t> self.funclist32 if self.funclist32 != NULL else 0
+
     def get_interface_list(self):
         """Return list of supported interface ``(name, major, minor)`` tuples.
 
