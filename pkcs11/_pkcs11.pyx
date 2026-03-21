@@ -16,6 +16,7 @@ from threading import RLock
 from cpython.bytearray cimport PyByteArray_AS_STRING, PyByteArray_GET_SIZE
 from cpython.mem cimport PyMem_Malloc, PyMem_Free
 from cpython.bytes cimport PyBytes_FromStringAndSize
+from libc.stdint cimport uintptr_t
 from libc.string cimport memcpy, memset, strlen
 
 from pkcs11 import types
@@ -4085,6 +4086,16 @@ cdef class lib(HasFuncList):
         One of ``"2.40"``, ``"3.0"``, ``"3.1"``, or ``"3.2"``.
         """
         return self._interface_version
+
+    @property
+    def _raw_funclist_ptr(self):
+        """Raw CK_FUNCTION_LIST pointer as int (for RawPKCS11)."""
+        return <uintptr_t> self.funclist if self.funclist != NULL else 0
+
+    @property
+    def _raw_funclist3_ptr(self):
+        """Raw CK_FUNCTION_LIST_3_0 pointer as int (for RawPKCS11 v3.0)."""
+        return <uintptr_t> self.funclist3 if self.funclist3 != NULL else 0
 
     def get_interface_list(self):
         """Return list of supported interface ``(name, major, minor)`` tuples.
