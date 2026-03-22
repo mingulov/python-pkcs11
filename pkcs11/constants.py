@@ -299,6 +299,9 @@ class Attribute(IntEnum):
     RSA private key CRT coefficient (q^-1 mod p). May not be stored.
     (`biginteger` as :class:`bytes`).
     """
+    PUBLIC_KEY_INFO = 0x00000129
+    """DER-encoded SubjectPublicKeyInfo for the associated public key (v3.0, :class:`bytes`)."""
+
     PRIME = 0x00000130
     """
     Prime number 'q' (used for DH).
@@ -366,6 +369,11 @@ class Attribute(IntEnum):
     """
     DER-encoded ANSI X9.62 Public key for :attr:`KeyType.EC` (:class:`bytes`).
     """
+
+    AKID = 0x0000018E
+    """Authority Key Identifier (v3.0, :class:`bytes`)."""
+    SKID = 0x0000018F
+    """Subject Key Identifier (v3.0, :class:`bytes`)."""
 
     SECONDARY_AUTH = 0x00000200
     AUTH_PIN_FLAGS = 0x00000201
