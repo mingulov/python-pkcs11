@@ -350,6 +350,14 @@ cdef class MechanismWithParam:
         cdef CK_CHACHA20_PARAMS *chacha20_params
         cdef CK_SALSA20_PARAMS *salsa20_params
         cdef CK_DES_CBC_ENCRYPT_DATA_PARAMS *des_cbc_params
+        cdef CK_SSL3_MASTER_KEY_DERIVE_PARAMS *ssl3_mkd_params
+        cdef CK_SSL3_KEY_MAT_PARAMS *ssl3_km_params
+        cdef CK_SSL3_KEY_MAT_OUT *ssl3_km_out
+        cdef CK_TLS12_MASTER_KEY_DERIVE_PARAMS *tls12_mkd_params
+        cdef CK_TLS12_KEY_MAT_PARAMS *tls12_km_params
+        cdef CK_TLS_MAC_PARAMS *tls_mac_params
+        cdef CK_TLS_KDF_PARAMS *tls_kdf_params
+        cdef CK_VERSION *tls_version
         cdef object sp800_entry
         cdef bytes data_bytes
         cdef bytes iv_bytes
@@ -908,6 +916,167 @@ cdef class MechanismWithParam:
             salsa20_params.pBlockCounter = <CK_BYTE *> block_counter
             salsa20_params.pNonce = <CK_BYTE *> nonce
             salsa20_params.ulNonceBits = <CK_ULONG>(len(nonce) * 8)
+
+        # SSL3/TLS master key derive (client_random, server_random)
+        elif mechanism in (Mechanism.SSL3_MASTER_KEY_DERIVE,
+                           Mechanism.TLS_MASTER_KEY_DERIVE,
+                           Mechanism.SSL3_MASTER_KEY_DERIVE_DH,
+                           Mechanism.TLS_MASTER_KEY_DERIVE_DH):
+            paramlen = sizeof(CK_SSL3_MASTER_KEY_DERIVE_PARAMS)
+            self.param = ssl3_mkd_params = \
+                <CK_SSL3_MASTER_KEY_DERIVE_PARAMS *> PyMem_Malloc(paramlen)
+            tls_version = <CK_VERSION *> PyMem_Malloc(sizeof(CK_VERSION))
+            tls_version.major = 0
+            tls_version.minor = 0
+            if isinstance(param, dict):
+                client_random = param['client_random']
+                server_random = param['server_random']
+            else:
+                (client_random, server_random) = param[:2]
+            ssl3_mkd_params.RandomInfo.pClientRandom = <CK_BYTE *> client_random
+            ssl3_mkd_params.RandomInfo.ulClientRandomLen = <CK_ULONG> len(client_random)
+            ssl3_mkd_params.RandomInfo.pServerRandom = <CK_BYTE *> server_random
+            ssl3_mkd_params.RandomInfo.ulServerRandomLen = <CK_ULONG> len(server_random)
+            ssl3_mkd_params.pVersion = tls_version
+
+        # TLS 1.2 master key derive (client_random, server_random, prf_hash)
+        elif mechanism in (Mechanism.TLS12_MASTER_KEY_DERIVE,
+                           Mechanism.TLS12_MASTER_KEY_DERIVE_DH,
+                           Mechanism.TLS12_EXTENDED_MASTER_KEY_DERIVE,
+                           Mechanism.TLS12_EXTENDED_MASTER_KEY_DERIVE_DH):
+            paramlen = sizeof(CK_TLS12_MASTER_KEY_DERIVE_PARAMS)
+            self.param = tls12_mkd_params = \
+                <CK_TLS12_MASTER_KEY_DERIVE_PARAMS *> PyMem_Malloc(paramlen)
+            tls_version = <CK_VERSION *> PyMem_Malloc(sizeof(CK_VERSION))
+            tls_version.major = 0
+            tls_version.minor = 0
+            if isinstance(param, dict):
+                client_random = param['client_random']
+                server_random = param['server_random']
+                prf_hash = param.get('prf_hash', Mechanism.SHA256)
+            else:
+                (client_random, server_random, prf_hash) = param[:3]
+            tls12_mkd_params.RandomInfo.pClientRandom = <CK_BYTE *> client_random
+            tls12_mkd_params.RandomInfo.ulClientRandomLen = <CK_ULONG> len(client_random)
+            tls12_mkd_params.RandomInfo.pServerRandom = <CK_BYTE *> server_random
+            tls12_mkd_params.RandomInfo.ulServerRandomLen = <CK_ULONG> len(server_random)
+            tls12_mkd_params.pVersion = tls_version
+            tls12_mkd_params.prfHashMechanism = <CK_MECHANISM_TYPE> prf_hash
+
+        # SSL3/TLS key and MAC derive
+        elif mechanism in (Mechanism.SSL3_KEY_AND_MAC_DERIVE,
+                           Mechanism.TLS_KEY_AND_MAC_DERIVE):
+            paramlen = sizeof(CK_SSL3_KEY_MAT_PARAMS)
+            self.param = ssl3_km_params = \
+                <CK_SSL3_KEY_MAT_PARAMS *> PyMem_Malloc(paramlen)
+            ssl3_km_out = <CK_SSL3_KEY_MAT_OUT *> PyMem_Malloc(sizeof(CK_SSL3_KEY_MAT_OUT))
+            if isinstance(param, dict):
+                client_random = param['client_random']
+                server_random = param['server_random']
+                mac_size = param.get('mac_size', 0)
+                key_size = param.get('key_size', 128)
+                iv_size = param.get('iv_size', 0)
+            else:
+                (client_random, server_random) = param[:2]
+                mac_size = 0; key_size = 128; iv_size = 0
+            ssl3_km_params.ulMacSizeInBits = <CK_ULONG> mac_size
+            ssl3_km_params.ulKeySizeInBits = <CK_ULONG> key_size
+            ssl3_km_params.ulIVSizeInBits = <CK_ULONG> iv_size
+            ssl3_km_params.bIsExport = <CK_BBOOL> 0
+            ssl3_km_params.RandomInfo.pClientRandom = <CK_BYTE *> client_random
+            ssl3_km_params.RandomInfo.ulClientRandomLen = <CK_ULONG> len(client_random)
+            ssl3_km_params.RandomInfo.pServerRandom = <CK_BYTE *> server_random
+            ssl3_km_params.RandomInfo.ulServerRandomLen = <CK_ULONG> len(server_random)
+            ssl3_km_params.pReturnedKeyMaterial = ssl3_km_out
+
+        # TLS 1.2 key and MAC derive / key safe derive
+        elif mechanism in (Mechanism.TLS12_KEY_AND_MAC_DERIVE,
+                           Mechanism.TLS12_KEY_SAFE_DERIVE):
+            paramlen = sizeof(CK_TLS12_KEY_MAT_PARAMS)
+            self.param = tls12_km_params = \
+                <CK_TLS12_KEY_MAT_PARAMS *> PyMem_Malloc(paramlen)
+            ssl3_km_out = <CK_SSL3_KEY_MAT_OUT *> PyMem_Malloc(sizeof(CK_SSL3_KEY_MAT_OUT))
+            if isinstance(param, dict):
+                client_random = param['client_random']
+                server_random = param['server_random']
+                prf_hash = param.get('prf_hash', Mechanism.SHA256)
+                mac_size = param.get('mac_size', 0)
+                key_size = param.get('key_size', 128)
+                iv_size = param.get('iv_size', 0)
+            else:
+                (client_random, server_random, prf_hash) = param[:3]
+                mac_size = 0; key_size = 128; iv_size = 0
+            tls12_km_params.ulMacSizeInBits = <CK_ULONG> mac_size
+            tls12_km_params.ulKeySizeInBits = <CK_ULONG> key_size
+            tls12_km_params.ulIVSizeInBits = <CK_ULONG> iv_size
+            tls12_km_params.bIsExport = <CK_BBOOL> 0
+            tls12_km_params.RandomInfo.pClientRandom = <CK_BYTE *> client_random
+            tls12_km_params.RandomInfo.ulClientRandomLen = <CK_ULONG> len(client_random)
+            tls12_km_params.RandomInfo.pServerRandom = <CK_BYTE *> server_random
+            tls12_km_params.RandomInfo.ulServerRandomLen = <CK_ULONG> len(server_random)
+            tls12_km_params.pReturnedKeyMaterial = ssl3_km_out
+            tls12_km_params.prfHashMechanism = <CK_MECHANISM_TYPE> prf_hash
+
+        # TLS MAC (prf_hash, mac_length, server_or_client)
+        elif mechanism in (Mechanism.TLS12_MAC, Mechanism.TLS_MAC):
+            paramlen = sizeof(CK_TLS_MAC_PARAMS)
+            self.param = tls_mac_params = \
+                <CK_TLS_MAC_PARAMS *> PyMem_Malloc(paramlen)
+            if isinstance(param, dict):
+                prf_hash = param.get('prf_hash', Mechanism.SHA256)
+                mac_length = param.get('mac_length', 12)
+                server_or_client = param.get('server_or_client', 1)
+            else:
+                (prf_hash, mac_length, server_or_client) = param[:3]
+            tls_mac_params.prfHashMechanism = <CK_MECHANISM_TYPE> prf_hash
+            tls_mac_params.ulMacLength = <CK_ULONG> mac_length
+            tls_mac_params.ulServerOrClient = <CK_ULONG> server_or_client
+
+        # TLS KDF (prf_mechanism, label, client_random, server_random)
+        elif mechanism in (Mechanism.TLS12_KDF, Mechanism.TLS_KDF):
+            paramlen = sizeof(CK_TLS_KDF_PARAMS)
+            self.param = tls_kdf_params = \
+                <CK_TLS_KDF_PARAMS *> PyMem_Malloc(paramlen)
+            if isinstance(param, dict):
+                prf_mech = param.get('prf_mechanism', Mechanism.SHA256)
+                label = param.get('label', b'')
+                client_random = param['client_random']
+                server_random = param['server_random']
+                context = param.get('context', b'')
+            else:
+                (prf_mech, label, client_random, server_random) = param[:4]
+                context = param[4] if len(param) > 4 else b''
+            tls_kdf_params.prfMechanism = <CK_MECHANISM_TYPE> prf_mech
+            tls_kdf_params.pLabel = <CK_BYTE *> label
+            tls_kdf_params.ulLabelLength = <CK_ULONG> len(label)
+            tls_kdf_params.RandomInfo.pClientRandom = <CK_BYTE *> client_random
+            tls_kdf_params.RandomInfo.ulClientRandomLen = <CK_ULONG> len(client_random)
+            tls_kdf_params.RandomInfo.pServerRandom = <CK_BYTE *> server_random
+            tls_kdf_params.RandomInfo.ulServerRandomLen = <CK_ULONG> len(server_random)
+            tls_kdf_params.pContextData = <CK_BYTE *> context if context else NULL
+            tls_kdf_params.ulContextDataLength = <CK_ULONG> len(context)
+
+        # TLS PRF (seed, label) - SSL3/TLS 1.0/1.1
+        elif mechanism == Mechanism.TLS_PRF:
+            # param = (seed_bytes, label_bytes)
+            paramlen = sizeof(CK_TLS_KDF_PARAMS)
+            self.param = tls_kdf_params = \
+                <CK_TLS_KDF_PARAMS *> PyMem_Malloc(paramlen)
+            if isinstance(param, dict):
+                seed = param.get('seed', b'')
+                label = param.get('label', b'')
+            else:
+                (seed, label) = param[:2]
+            # For TLS_PRF, seed goes into RandomInfo as client_random
+            tls_kdf_params.prfMechanism = <CK_MECHANISM_TYPE> Mechanism.TLS_PRF
+            tls_kdf_params.pLabel = <CK_BYTE *> label
+            tls_kdf_params.ulLabelLength = <CK_ULONG> len(label)
+            tls_kdf_params.RandomInfo.pClientRandom = <CK_BYTE *> seed
+            tls_kdf_params.RandomInfo.ulClientRandomLen = <CK_ULONG> len(seed)
+            tls_kdf_params.RandomInfo.pServerRandom = NULL
+            tls_kdf_params.RandomInfo.ulServerRandomLen = 0
+            tls_kdf_params.pContextData = NULL
+            tls_kdf_params.ulContextDataLength = 0
 
         elif param is None:
             self.data.pParameter = NULL

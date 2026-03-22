@@ -479,6 +479,63 @@ cdef extern from '../extern/cryptoki.h':
         CK_BYTE *pNonce
         CK_ULONG ulNonceBits
 
+    # SSL3/TLS structures
+    ctypedef struct CK_SSL3_RANDOM_DATA:
+        CK_BYTE *pClientRandom
+        CK_ULONG ulClientRandomLen
+        CK_BYTE *pServerRandom
+        CK_ULONG ulServerRandomLen
+
+    ctypedef struct CK_SSL3_KEY_MAT_OUT:
+        CK_OBJECT_HANDLE hClientMacSecret
+        CK_OBJECT_HANDLE hServerMacSecret
+        CK_OBJECT_HANDLE hClientKey
+        CK_OBJECT_HANDLE hServerKey
+        CK_BYTE *pIVClient
+        CK_BYTE *pIVServer
+
+    ctypedef CK_SSL3_KEY_MAT_OUT *CK_SSL3_KEY_MAT_OUT_PTR
+
+    ctypedef struct CK_SSL3_MASTER_KEY_DERIVE_PARAMS:
+        CK_SSL3_RANDOM_DATA RandomInfo
+        CK_VERSION *pVersion
+
+    ctypedef struct CK_SSL3_KEY_MAT_PARAMS:
+        CK_ULONG ulMacSizeInBits
+        CK_ULONG ulKeySizeInBits
+        CK_ULONG ulIVSizeInBits
+        CK_BBOOL bIsExport
+        CK_SSL3_RANDOM_DATA RandomInfo
+        CK_SSL3_KEY_MAT_OUT_PTR pReturnedKeyMaterial
+
+    # TLS 1.2 structures
+    ctypedef struct CK_TLS12_MASTER_KEY_DERIVE_PARAMS:
+        CK_SSL3_RANDOM_DATA RandomInfo
+        CK_VERSION *pVersion
+        CK_MECHANISM_TYPE prfHashMechanism
+
+    ctypedef struct CK_TLS12_KEY_MAT_PARAMS:
+        CK_ULONG ulMacSizeInBits
+        CK_ULONG ulKeySizeInBits
+        CK_ULONG ulIVSizeInBits
+        CK_BBOOL bIsExport
+        CK_SSL3_RANDOM_DATA RandomInfo
+        CK_SSL3_KEY_MAT_OUT_PTR pReturnedKeyMaterial
+        CK_MECHANISM_TYPE prfHashMechanism
+
+    ctypedef struct CK_TLS_MAC_PARAMS:
+        CK_MECHANISM_TYPE prfHashMechanism
+        CK_ULONG ulMacLength
+        CK_ULONG ulServerOrClient
+
+    ctypedef struct CK_TLS_KDF_PARAMS:
+        CK_MECHANISM_TYPE prfMechanism
+        CK_BYTE *pLabel
+        CK_ULONG ulLabelLength
+        CK_SSL3_RANDOM_DATA RandomInfo
+        CK_BYTE *pContextData
+        CK_ULONG ulContextDataLength
+
     # CK_DES_CBC_ENCRYPT_DATA_PARAMS — DES/3DES CBC key derivation (8-byte IV)
     ctypedef struct CK_DES_CBC_ENCRYPT_DATA_PARAMS:
         CK_BYTE iv[8]
