@@ -391,12 +391,18 @@ class RawPKCS11:
             get_iface.argtypes = [CK_BYTE_PTR, CK_VOID_PTR, POINTER(c_void_p), CK_FLAGS]
             iface_ptr = c_void_p()
             rv = get_iface(None, None, byref(iface_ptr), 0)
-            ptr_val = iface_ptr.value
-            if rv == CKR_OK and ptr_val is not None:
-                self._load_from_ptr(ptr_val)
-                self._load_v30_from_ptr(ptr_val)
-                self._load_v32_from_ptr(ptr_val)
-                return
+            iface_val = iface_ptr.value
+            if rv == CKR_OK and iface_val is not None:
+                # iface_val is CK_INTERFACE* {pInterfaceName, pFunctionList, flags}
+                # Extract pFunctionList (second pointer-sized field)
+                ptr_size = ctypes.sizeof(c_void_p)
+                fl_addr_ptr = cast(iface_val + ptr_size, POINTER(c_void_p))
+                fl_val = fl_addr_ptr.contents.value
+                if fl_val:
+                    self._load_from_ptr(fl_val)
+                    self._load_v30_from_ptr(fl_val)
+                    self._load_v32_from_ptr(fl_val)
+                    return
         except (AttributeError, OSError):
             pass  # C_GetInterface not exported — fall back to v2.40
 
