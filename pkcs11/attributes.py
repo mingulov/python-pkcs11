@@ -33,9 +33,25 @@ handle_bool: Handler = (
 handle_ulong: Handler = (_ulong_struct.pack, lambda v: _ulong_struct.unpack(v)[0])
 handle_version: Handler = (lambda v: _version_struct.pack(*v), lambda v: _version_struct.unpack(v))
 handle_str: Handler = (lambda s: s.encode("utf-8"), lambda b: b.decode("utf-8"))
+def _parse_ck_date(s: bytes):
+    """Parse CK_DATE bytes to datetime.date, or None if empty/invalid.
+
+    Per OASIS spec, empty CK_DATE has ulValueLen=0, but older implementations
+    may use 8 null bytes or spaces. Applications must be flexible.
+    """
+    if not s or len(s) < 8:
+        return None
+    text = s.decode("ascii", errors="replace").strip().strip("\x00")
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text, "%Y%m%d").date()
+    except ValueError:
+        return None
+
 handle_date: Handler = (
-    lambda s: s.strftime("%Y%m%d").encode("ascii"),
-    lambda s: datetime.strptime(s.decode("ascii"), "%Y%m%d").date(),
+    lambda s: s.strftime("%Y%m%d").encode("ascii") if s is not None else b"",
+    _parse_ck_date,
 )
 handle_bytes: Handler = (bytes, bytes)
 # The PKCS#11 biginteger type is an array of bytes in network byte order.
