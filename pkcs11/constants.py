@@ -370,11 +370,6 @@ class Attribute(IntEnum):
     DER-encoded ANSI X9.62 Public key for :attr:`KeyType.EC` (:class:`bytes`).
     """
 
-    AKID = 0x0000018E
-    """Authority Key Identifier (v3.0, :class:`bytes`)."""
-    SKID = 0x0000018F
-    """Subject Key Identifier (v3.0, :class:`bytes`)."""
-
     SECONDARY_AUTH = 0x00000200
     AUTH_PIN_FLAGS = 0x00000201
 
