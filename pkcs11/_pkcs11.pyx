@@ -1078,6 +1078,13 @@ cdef class MechanismWithParam:
             tls_kdf_params.pContextData = NULL
             tls_kdf_params.ulContextDataLength = 0
 
+        # MAC_GENERAL and other mechanisms that take a single CK_ULONG param
+        # (CK_MAC_GENERAL_PARAMS = CK_ULONG = MAC output length)
+        elif isinstance(param, int):
+            paramlen = sizeof(CK_ULONG)
+            self.param = <CK_ULONG *> PyMem_Malloc(paramlen)
+            (<CK_ULONG *> self.param)[0] = <CK_ULONG> param
+
         elif param is None:
             self.data.pParameter = NULL
             paramlen = 0
