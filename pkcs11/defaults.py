@@ -14,6 +14,7 @@ from pkcs11.mechanisms import MGF, KeyType, Mechanism
 
 DEFAULT_GENERATE_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.AES: Mechanism.AES_KEY_GEN,
+    KeyType.CAMELLIA: Mechanism.CAMELLIA_KEY_GEN,
     KeyType.DES2: Mechanism.DES2_KEY_GEN,
     KeyType.DES3: Mechanism.DES3_KEY_GEN,
     KeyType.DH: Mechanism.DH_PKCS_KEY_PAIR_GEN,
@@ -41,6 +42,7 @@ _WRAPPING: Final[MechanismFlag] = MechanismFlag.WRAP | MechanismFlag.UNWRAP
 
 DEFAULT_KEY_CAPABILITIES: Final[dict[KeyType, MechanismFlag | int]] = {
     KeyType.AES: _ENCRYPTION | _SIGNING | _WRAPPING,
+    KeyType.CAMELLIA: _ENCRYPTION | _SIGNING | _WRAPPING,
     KeyType.DES2: _ENCRYPTION | _SIGNING | _WRAPPING,
     KeyType.DES3: _ENCRYPTION | _SIGNING | _WRAPPING,
     KeyType.DH: MechanismFlag.DERIVE,
@@ -64,6 +66,7 @@ Default capabilities for generating keys.
 
 DEFAULT_ENCRYPT_MECHANISMS: Final[dict[KeyType, Mechanism]] = {
     KeyType.AES: Mechanism.AES_CBC_PAD,
+    KeyType.CAMELLIA: Mechanism.CAMELLIA_CBC_PAD,
     KeyType.DES2: Mechanism.DES3_CBC_PAD,
     KeyType.DES3: Mechanism.DES3_CBC_PAD,
     KeyType.RSA: Mechanism.RSA_PKCS_OAEP,
